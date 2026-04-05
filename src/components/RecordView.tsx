@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 // Tauri API response wrapper
@@ -25,6 +26,28 @@ interface MeetingResponse {
 	created_at: string;
 }
 
+// Transcription progress event from Tauri
+interface TranscriptionProgress {
+	percentage: number;
+	status: string;
+}
+
+// Summary response from Tauri
+interface GenerateSummaryResponse {
+	summary_id: number;
+	key_points: string;
+	decisions: string;
+	action_items: string;
+	duration_seconds: number;
+}
+
+type ProcessingStage =
+	| "idle"
+	| "transcribing"
+	| "transcription_complete"
+	| "generating_summary"
+	| "complete";
+
 type RecordingState = "idle" | "recording" | "saving" | "processing";
 
 interface RecordViewProps {
@@ -40,7 +63,39 @@ export function RecordView({ onMeetingCreated }: RecordViewProps) {
 	const [error, setError] = useState<string | null>(null);
 	const [recordingResult, setRecordingResult] = useState<RecordingResponse | null>(null);
 
+	// Processing state
+	const [processingStage, setProcessingStage] = useState<ProcessingStage>("idle");
+	const [transcriptionProgress, setTranscriptionProgress] = useState<TranscriptionProgress>({
+		percentage: 0,
+		status: "",
+	});
+	const [transcriptionResult, setTranscriptionResult] = useState<{
+		transcript_id: number;
+		text: string;
+	} | null>(null);
+	const [processingError, setProcessingError] = useState<string | null>(null);
+	const [currentMeetingId, setCurrentMeetingId] = useState<number | null>(null);
+
+	const unlistenRef = useRef<UnlistenFn | null>(null);
 	const recordingIntervalRef = useRef<number | null>(null);
+
+	// Listen to transcription progress events
+	useEffect(() => {
+		const setupListener = async () => {
+			const unlisten = await listen<TranscriptionProgress>("transcription-progress", (event) => {
+				setTranscriptionProgress(event.payload);
+			});
+			unlistenRef.current = unlisten;
+		};
+
+		setupListener();
+
+		return () => {
+			if (unlistenRef.current) {
+				unlistenRef.current();
+			}
+		};
+	}, []);
 
 	// Generate default meeting title
 	const generateDefaultTitle = useCallback(() => {
@@ -62,6 +117,85 @@ export function RecordView({ onMeetingCreated }: RecordViewProps) {
 		const mins = Math.floor(seconds / 60);
 		const secs = Math.floor(seconds % 60);
 		return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+	};
+
+	// Start transcription
+	const startTranscription = async (meetingId: number, audioPath: string) => {
+		setProcessingStage("transcribing");
+		setTranscriptionProgress({ percentage: 0, status: "Loading model..." });
+
+		try {
+			const response = await invoke<
+				ApiResponse<{ transcript_id: number; text: string; duration_seconds: number }>
+			>("transcribe_audio_command", {
+				meeting_id: meetingId,
+				audio_path: audioPath,
+			});
+
+			if (response.success && response.data) {
+				setTranscriptionResult({
+					transcript_id: response.data.transcript_id,
+					text: response.data.text,
+				});
+				setProcessingStage("transcription_complete");
+			} else {
+				setProcessingError(response.error || "Transcription failed");
+				setProcessingStage("idle");
+			}
+		} catch (err) {
+			setProcessingError(err instanceof Error ? err.message : "Transcription failed");
+			setProcessingStage("idle");
+		}
+	};
+
+	// Generate summary
+	const generateSummary = async () => {
+		if (!currentMeetingId || !transcriptionResult) return;
+
+		setProcessingStage("generating_summary");
+		setProcessingError(null);
+
+		try {
+			const response = await invoke<ApiResponse<GenerateSummaryResponse>>(
+				"generate_summary_command",
+				{
+					meeting_id: currentMeetingId,
+					transcript: transcriptionResult.text,
+				},
+			);
+
+			if (response.success && response.data) {
+				setProcessingStage("complete");
+				// Navigate to meeting detail after a short delay
+				setTimeout(() => {
+					if (onMeetingCreated) {
+						onMeetingCreated(currentMeetingId);
+					}
+				}, 500);
+			} else {
+				setProcessingError(response.error || "Failed to generate summary");
+				setProcessingStage("transcription_complete");
+			}
+		} catch (err) {
+			setProcessingError(err instanceof Error ? err.message : "Failed to generate summary");
+			setProcessingStage("transcription_complete");
+		}
+	};
+
+	// Skip summary generation
+	const skipSummary = () => {
+		if (currentMeetingId && onMeetingCreated) {
+			onMeetingCreated(currentMeetingId);
+		}
+	};
+
+	// Reset processing state
+	const resetProcessing = () => {
+		setProcessingStage("idle");
+		setTranscriptionProgress({ percentage: 0, status: "" });
+		setTranscriptionResult(null);
+		setProcessingError(null);
+		setCurrentMeetingId(null);
 	};
 
 	// Start recording
@@ -135,15 +269,14 @@ export function RecordView({ onMeetingCreated }: RecordViewProps) {
 			});
 
 			if (response.success && response.data) {
+				setCurrentMeetingId(response.data.id);
 				setShowTitleModal(false);
 				setMeetingTitle("");
 				setRecordingResult(null);
 				setRecordingDuration(0);
 
-				// Notify parent component
-				if (onMeetingCreated) {
-					onMeetingCreated(response.data.id);
-				}
+				// Start transcription immediately after saving
+				await startTranscription(response.data.id, request.audio_path);
 			} else {
 				setError(response.error || "Failed to save meeting");
 			}
@@ -168,11 +301,84 @@ export function RecordView({ onMeetingCreated }: RecordViewProps) {
 			if (recordingIntervalRef.current) {
 				clearInterval(recordingIntervalRef.current);
 			}
+			if (unlistenRef.current) {
+				unlistenRef.current();
+			}
 		};
 	}, []);
 
 	const isRecording = recordingState === "recording";
 	const isSaving = recordingState === "saving";
+	const isProcessing = processingStage !== "idle" && processingStage !== "complete";
+
+	// Show processing view
+	if (isProcessing) {
+		return (
+			<div className="record-view">
+				<div className="processing-container">
+					<h2>Processing Meeting</h2>
+
+					{processingStage === "transcribing" && (
+						<div className="processing-step">
+							<div className="processing-spinner" />
+							<h3>Transcribing Audio</h3>
+							<p className="processing-status">{transcriptionProgress.status}</p>
+							<div className="progress-bar">
+								<div
+									className="progress-fill"
+									style={{ width: `${transcriptionProgress.percentage}%` }}
+								/>
+							</div>
+							<span className="progress-percentage">
+								{Math.round(transcriptionProgress.percentage)}%
+							</span>
+						</div>
+					)}
+
+					{processingStage === "transcription_complete" && (
+						<div className="processing-step">
+							<div className="processing-complete-icon">✓</div>
+							<h3>Transcription Complete</h3>
+							<p className="processing-status">
+								Transcript saved with {transcriptionResult?.text.split(" ").length || 0} words
+							</p>
+
+							{processingError && (
+								<div className="processing-error">
+									<span className="error-icon">⚠️</span>
+									<span>{processingError}</span>
+								</div>
+							)}
+
+							<div className="processing-actions">
+								<button type="button" className="processing-button secondary" onClick={skipSummary}>
+									Skip Summary
+								</button>
+								<button
+									type="button"
+									className="processing-button primary"
+									onClick={generateSummary}
+									disabled={!transcriptionResult}
+								>
+									Generate Summary
+								</button>
+							</div>
+						</div>
+					)}
+
+					{processingStage === "generating_summary" && (
+						<div className="processing-step">
+							<div className="processing-spinner" />
+							<h3>Generating Summary</h3>
+							<p className="processing-status">
+								AI is analyzing the transcript and extracting key points...
+							</p>
+						</div>
+					)}
+				</div>
+			</div>
+		);
+	}
 
 	return (
 		<div className="record-view">
@@ -203,7 +409,7 @@ export function RecordView({ onMeetingCreated }: RecordViewProps) {
 						type="button"
 						className={`record-button ${isRecording ? "recording" : ""}`}
 						onClick={isRecording ? stopRecording : startRecording}
-						disabled={isSaving}
+						disabled={isSaving || isProcessing}
 						aria-label={isRecording ? "Stop recording" : "Start recording"}
 					>
 						{isRecording ? (
@@ -221,7 +427,7 @@ export function RecordView({ onMeetingCreated }: RecordViewProps) {
 				</div>
 
 				{/* Instructions */}
-				{!isRecording && !isSaving && (
+				{!isRecording && !isSaving && !isProcessing && (
 					<div className="record-instructions">
 						<p>Click the button above to start recording your meeting.</p>
 						<p className="record-hint">
@@ -280,7 +486,10 @@ export function RecordView({ onMeetingCreated }: RecordViewProps) {
 							<button
 								type="button"
 								className="modal-button secondary"
-								onClick={cancelSave}
+								onClick={() => {
+									cancelSave();
+									resetProcessing();
+								}}
 								disabled={isSubmitting}
 							>
 								Discard
