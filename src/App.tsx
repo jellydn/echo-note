@@ -1,12 +1,14 @@
 import { useState } from "react";
 import "./App.css";
 import { HistoryView } from "./components/HistoryView";
+import { MeetingDetailView } from "./components/MeetingDetailView";
 import { RecordView } from "./components/RecordView";
 
 type View = "record" | "history" | "settings" | "meeting-detail";
 
 function App() {
 	const [currentView, setCurrentView] = useState<View>("record");
+	const [selectedMeetingId, setSelectedMeetingId] = useState<number | null>(null);
 
 	const renderView = () => {
 		switch (currentView) {
@@ -25,10 +27,29 @@ function App() {
 					<HistoryView
 						onMeetingClick={(meetingId) => {
 							console.log("Meeting clicked:", meetingId);
-							// Future: Navigate to meeting detail view (US-015)
+							setSelectedMeetingId(meetingId);
+							setCurrentView("meeting-detail");
 						}}
 						onDeleteMeeting={(meetingId) => {
 							console.log("Meeting deleted:", meetingId);
+							// If we're viewing the deleted meeting, go back to history
+							if (selectedMeetingId === meetingId) {
+								setSelectedMeetingId(null);
+							}
+						}}
+					/>
+				);
+			case "meeting-detail":
+				if (selectedMeetingId === null) {
+					setCurrentView("history");
+					return null;
+				}
+				return (
+					<MeetingDetailView
+						meetingId={selectedMeetingId}
+						onBack={() => {
+							setSelectedMeetingId(null);
+							setCurrentView("history");
 						}}
 					/>
 				);
