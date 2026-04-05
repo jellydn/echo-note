@@ -11,6 +11,35 @@ Started: Mon Apr  6 06:32:26 +08 2026
 - Run `cargo check` for Rust typecheck and `tsc --noEmit` for TypeScript typecheck
 - Use `cargo clippy` for Rust linting
 - Project uses bun for package management (bun.lock present)
+- **SQLx with SQLite**: Use `sqlx::query!` macro with `chrono` feature for DateTime support
+- **Database initialization**: Run migrations in `setup()` hook, store pool in `AppState`
+- **DateTime handling**: Use RFC 3339 strings for JSON serialization, chrono DateTime<Utc> for DB
+- **API Response pattern**: Use generic `ApiResponse<T>` struct for consistent responses
+
+## [Mon Apr 6 2026 15:45:00 +08] - US-002
+- What was implemented:
+  - Added SQLx dependency with SQLite and chrono features to Cargo.toml
+  - Created `src/db/mod.rs` with database initialization and migrations
+  - Created `meetings` table with all required columns (id, title, date, duration_seconds, audio_path, created_at)
+  - Implemented Rust functions: create_meeting, get_meeting, list_meetings, delete_meeting
+  - Added Tauri commands exposed to frontend with consistent ApiResponse wrapper
+  - Database initializes on app startup and stores pool in AppState
+- Files changed:
+  - `src-tauri/Cargo.toml` - Added sqlx, tokio, chrono, anyhow dependencies
+  - `src-tauri/src/db/mod.rs` - New database module (created)
+  - `src-tauri/src/lib.rs` - Integrated database, added Tauri commands
+- Quality checks passed:
+  - TypeScript typecheck: `tsc --noEmit` ✓
+  - Rust typecheck: `cargo check` ✓
+  - Rust lint: `cargo clippy` ✓
+  - Rust format: `cargo fmt --check` ✓
+- **Learnings for future iterations:**
+  - SQLx requires `chrono` feature enabled for DateTime<Utc> support with SQLite
+  - Use `tauri::Manager` trait to access `app.manage()` for state management
+  - RFC 3339 format is the standard for datetime serialization in JSON APIs
+  - The `setup()` hook in tauri::Builder is where database initialization should happen
+  - Use `tauri::async_runtime::block_on()` for async initialization in sync setup context
+---
 
 ## [Mon Apr 6 06:45:00 +08 2026] - US-001
 - What was implemented:
