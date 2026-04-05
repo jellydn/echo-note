@@ -1,3 +1,38 @@
 # Ralph Progress Log
 Started: Mon Apr  6 06:32:26 +08 2026
 ---
+
+## Codebase Patterns
+- Use Tauri v2 with React + TypeScript frontend
+- Rust backend with tauri::command for exposing functions to frontend
+- TypeScript strict mode enabled - must provide explicit types for buttons (type="button")
+- CSS uses CSS variables and prefers-color-scheme for dark mode support
+- Use `cargo tauri dev` for development with hot reload
+- Run `cargo check` for Rust typecheck and `tsc --noEmit` for TypeScript typecheck
+- Use `cargo clippy` for Rust linting
+- Project uses bun for package management (bun.lock present)
+
+## [Mon Apr 6 06:45:00 +08 2026] - US-001
+- What was implemented:
+  - Initialized Tauri v2 + React + TypeScript project using `npm create tauri-app@latest`
+  - Created shell layout with sidebar navigation (Record, History, Settings)
+  - Styled sidebar with dark theme (navy blue: #1a1a2e)
+  - Added active state handling for navigation buttons
+  - Created placeholder views for each section
+- Files changed:
+  - `src/App.tsx` - Main app component with sidebar and view routing
+  - `src/App.css` - Sidebar and layout styles
+  - `package.json` - Added typecheck and lint scripts
+  - All Tauri scaffold files (src-tauri/, vite.config.ts, tsconfig.json, etc.)
+- Quality checks passed:
+  - TypeScript typecheck: `tsc --noEmit` ✓
+  - Rust typecheck: `cargo check` ✓
+  - Rust lint: `cargo clippy` ✓
+  - Rust format: `cargo fmt --check` ✓
+- **Learnings for future iterations:**
+  - Button elements in React need explicit `type="button"` to avoid form submission issues
+  - Tauri's lib.rs pattern: commands are defined in lib.rs and exposed via invoke_handler
+  - The project uses `bun` as package manager (evident from bun.lock)
+  - CSS Grid/Flexbox layout works well for sidebar + main content pattern
+  - Dark mode support is built-in via `prefers-color-scheme` media query
+---
