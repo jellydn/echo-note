@@ -15,6 +15,8 @@ Started: Mon Apr  6 06:32:26 +08 2026
 - **Database initialization**: Run migrations in `setup()` hook, store pool in `AppState`
 - **DateTime handling**: Use RFC 3339 strings for JSON serialization, chrono DateTime<Utc> for DB
 - **API Response pattern**: Use generic `ApiResponse<T>` struct for consistent responses
+- **Settings pattern**: UPSERT via `ON CONFLICT(key) DO UPDATE`, defaults via `INSERT OR IGNORE`
+- **Foreign keys**: Use `ON DELETE CASCADE` for auto-cleanup of related records
 
 ## [Mon Apr 6 2026 15:45:00 +08] - US-002
 - What was implemented:
@@ -91,4 +93,34 @@ Started: Mon Apr  6 06:32:26 +08 2026
   - Use get_by_meeting queries to retrieve related data in a one-to-one relationship pattern
   - Consistent ApiResponse wrapper pattern works well for all command types
   - When adding new commands, remember to register them in generate_handler! macro
+---
+
+## [Mon Apr 7 2026 06:45:00 +08] - US-004
+- What was implemented:
+  - Added settings table to database schema with key-value pairs and timestamps
+  - Created Setting struct with SQLx FromRow derive for database mapping
+  - Added default constants: DEFAULT_AUDIO_DEVICE, DEFAULT_WHISPER_MODEL_SIZE, DEFAULT_LLM_PROVIDER, DEFAULT_API_KEY, DEFAULT_API_ENDPOINT
+  - Implemented get_setting with default value fallback when key doesn't exist
+  - Implemented set_setting with UPSERT (INSERT ON CONFLICT UPDATE) pattern
+  - Implemented list_settings and delete_setting for completeness
+  - Added init_default_settings() to seed default values on first launch
+  - Created Tauri commands: get_setting_command, set_setting_command, list_settings_command, delete_setting_command
+  - Added SettingResponse struct with RFC 3339 date serialization
+  - Registered all new commands in invoke_handler
+  - Default settings are initialized in setup hook before app starts
+- Files changed:
+  - `src-tauri/src/db/mod.rs` - Added Setting struct, defaults, CRUD functions, init_default_settings
+  - `src-tauri/src/lib.rs` - Added Tauri commands, imports, and invoke_handler registration
+- Quality checks passed:
+  - TypeScript typecheck: `tsc --noEmit` ✓
+  - Rust typecheck: `cargo check` ✓
+  - Rust lint: `cargo clippy` ✓
+  - Rust format: `cargo fmt --check` ✓
+  - Pre-commit hooks: all passed ✓
+- **Learnings for future iterations:**
+  - SQLite UPSERT via `INSERT ... ON CONFLICT(key) DO UPDATE` is cleaner than separate insert/update logic
+  - init_default_settings with INSERT OR IGNORE ensures defaults exist without overwriting user changes
+  - The `sqlx::query_as::<_, (String,)>` pattern works for fetching single values
+  - When adding new tables, remember to add defaults initialization in setup hook
+  - Settings CRUD follows same pattern as meetings/transcripts/summaries: get_setting with default fallback, set_setting with UPSERT, list_settings, delete_setting
 ---
