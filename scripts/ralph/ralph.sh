@@ -1,11 +1,64 @@
 #!/bin/bash
 # Ralph Wiggum - Long-running AI agent loop
 # Usage: ./ralph.sh [max_iterations] [cli_tool] [model] [share]
-# cli_tool: amp (default) or opencode
-# model: opencode model ID or amp mode (smart/rush)
-# share: true/false (default: false) - share session for opencode
+# cli_tool: amp (default), opencode, or pi
+# model: opencode model ID, amp mode (smart/rush), or pi model pattern
+# share: true/false (default: false) - share session for opencode/pi
 
 set -e
+
+# Show help
+show_help() {
+	cat << 'EOF'
+Ralph Wiggum - Long-running AI agent loop for EchoNote
+
+Usage:
+  ./ralph.sh [max_iterations] [cli_tool] [model] [share]
+
+Arguments:
+  max_iterations    Number of iterations to run (default: 10)
+  cli_tool         CLI tool to use: amp (default), opencode, or pi
+  model            Model ID for opencode, mode for amp (smart/rush), or pi model pattern
+  share            Share session: true/false (default: false) - for opencode/pi
+
+Options:
+  -h, --help       Show this help message and exit
+
+Examples:
+  # Run with defaults (amp, 10 iterations)
+  ./ralph.sh
+
+  # Run 5 iterations with opencode
+  ./ralph.sh 5 opencode
+
+  # Run with specific model
+  ./ralph.sh 10 opencode opencode/big-pickle true
+
+  # Run with pi (uses --model and --thinking flags)
+  ./ralph.sh 10 pi google/gemini-2.0-flash true
+
+  # Run pi with thinking level
+  ./ralph.sh 10 pi claude-sonnet:high true
+
+Files:
+  prompt-amp.md       - System prompt for amp CLI
+  prompt-opencode.md  - System prompt for opencode CLI
+  prompt-pi.md        - System prompt for pi CLI
+  prd.json            - Product requirements in Ralph format
+  progress.txt        - Progress log of completed stories
+
+Completion Signal:
+  Ralph stops when the agent outputs: <promise>COMPLETE</promise>
+EOF
+}
+
+# Parse arguments for --help before positional args
+for arg in "$@"; do
+	if [ "$arg" = "--help" ] || [ "$arg" = "-h" ]; then
+		show_help
+		exit 0
+	fi
+done
 
 MAX_ITERATIONS=${1:-10}
 CLI_TOOL=${2:-amp}
@@ -18,6 +71,11 @@ PROMPT_FILE="$SCRIPT_DIR/prompt-$CLI_TOOL.md"
 if [ "$CLI_TOOL" = "opencode" ]; then
 	export OPENCODE_PERMISSION='{"*": "allow"}'
 	export OPENCODE_DISABLE_AUTOCOMPACT=true
+fi
+
+# Set pi permissions via environment variable (equivalent to --dangerously-allow-all)
+if [ "$CLI_TOOL" = "pi" ]; then
+	export PI_PERMISSION='{"*": "allow"}'
 fi
 
 PRD_FILE="$SCRIPT_DIR/prd.json"
@@ -71,7 +129,7 @@ if [ -n "$MODEL" ]; then
 else
 	echo "Using CLI: $CLI_TOOL (default model)"
 fi
-if [ "$CLI_TOOL" = "opencode" ]; then
+if [ "$CLI_TOOL" = "opencode" ] || [ "$CLI_TOOL" = "pi" ]; then
 	echo "Share session: $SHARE"
 fi
 
@@ -81,13 +139,28 @@ for i in $(seq 1 $MAX_ITERATIONS); do
 	echo "  Ralph Iteration $i of $MAX_ITERATIONS"
 	echo "═══════════════════════════════════════════════════════"
 
-	# Run amp or opencode with the ralph prompt
+	# Run amp, opencode, or pi with the ralph prompt
 	if [ "$CLI_TOOL" = "opencode" ]; then
 		OPENCODE_MODEL=${MODEL:-opencode/big-pickle}
 		if [ "$SHARE" = "true" ]; then
 			OUTPUT=$(cat "$PROMPT_FILE" | opencode run -m "$OPENCODE_MODEL" --agent build --share - 2>&1 | tee /dev/stderr) || true
 		else
 			OUTPUT=$(cat "$PROMPT_FILE" | opencode run -m "$OPENCODE_MODEL" --agent build - 2>&1 | tee /dev/stderr) || true
+		fi
+	elif [ "$CLI_TOOL" = "pi" ]; then
+		# pi uses --model pattern and supports thinking levels via :suffix
+		if [ -n "$MODEL" ]; then
+			if [ "$SHARE" = "true" ]; then
+				OUTPUT=$(cat "$PROMPT_FILE" | pi --model "$MODEL" --share -p 2>&1 | tee /dev/stderr) || true
+			else
+				OUTPUT=$(cat "$PROMPT_FILE" | pi --model "$MODEL" -p 2>&1 | tee /dev/stderr) || true
+			fi
+		else
+			if [ "$SHARE" = "true" ]; then
+				OUTPUT=$(cat "$PROMPT_FILE" | pi --share -p 2>&1 | tee /dev/stderr) || true
+			else
+				OUTPUT=$(cat "$PROMPT_FILE" | pi -p 2>&1 | tee /dev/stderr) || true
+			fi
 		fi
 	else
 		if [ -n "$MODEL" ]; then

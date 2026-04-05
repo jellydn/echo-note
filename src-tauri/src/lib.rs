@@ -1,5 +1,6 @@
 mod audio;
 mod db;
+mod llm;
 mod system_audio;
 mod whisper;
 
@@ -13,6 +14,7 @@ use db::{
     DEFAULT_API_ENDPOINT, DEFAULT_API_KEY, DEFAULT_AUDIO_DEVICE, DEFAULT_LLM_PROVIDER,
     DEFAULT_WHISPER_MODEL_SIZE,
 };
+use llm::{check_ollama_status, generate_summary, DEFAULT_OLLAMA_URL, DEFAULT_SUMMARY_MODEL};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use system_audio::{get_blackhole_device_name, is_blackhole_installed};
@@ -796,6 +798,91 @@ async fn transcribe_audio_command(
     }))
 }
 
+// ==================== LLM / SUMMARY COMMANDS ====================
+
+/// Summary generation response
+#[derive(Serialize, Clone)]
+struct GenerateSummaryResponse {
+    summary_id: i64,
+    key_points: String,
+    decisions: String,
+    action_items: String,
+    duration_seconds: f64,
+}
+
+/// Ollama status response
+#[derive(Serialize, Clone)]
+struct OllamaStatusResponse {
+    available: bool,
+    url: String,
+}
+
+/// Check if Ollama is available
+#[tauri::command]
+async fn check_ollama_status_command() -> Result<ApiResponse<OllamaStatusResponse>, String> {
+    let url = DEFAULT_OLLAMA_URL;
+    let available = check_ollama_status(url)
+        .await
+        .map_err(|e| format!("Failed to check Ollama status: {}", e))?;
+
+    Ok(ApiResponse::success(OllamaStatusResponse {
+        available,
+        url: url.to_string(),
+    }))
+}
+
+/// Generate a summary from a transcript and save to database
+#[tauri::command]
+async fn generate_summary_command(
+    state: State<'_, AppStateExt>,
+    meeting_id: i64,
+    transcript: String,
+) -> Result<ApiResponse<GenerateSummaryResponse>, String> {
+    // Get LLM provider and settings
+    let llm_provider = get_setting(&state.db, "llm_provider", DEFAULT_LLM_PROVIDER)
+        .await
+        .map_err(|e| format!("Failed to get LLM provider setting: {}", e))?;
+
+    // Currently only Ollama is supported (US-011 will add API fallback)
+    if llm_provider != "ollama" {
+        return Err(format!(
+            "LLM provider '{}' not yet implemented. Use 'ollama'.",
+            llm_provider
+        ));
+    }
+
+    // Get Ollama URL from settings or use default
+    let ollama_url = DEFAULT_OLLAMA_URL.to_string();
+
+    // For now, use default model. US-016 will allow configuring this via settings
+    let model = DEFAULT_SUMMARY_MODEL;
+
+    // Generate summary
+    let result = generate_summary(&ollama_url, model, &transcript)
+        .await
+        .map_err(|e| format!("Failed to generate summary: {}", e))?;
+
+    // Save summary to database
+    let summary_input = CreateSummaryInput {
+        meeting_id,
+        key_points: result.key_points.clone(),
+        decisions: result.decisions.clone(),
+        action_items: result.action_items.clone(),
+    };
+
+    let summary_id = create_summary(&state.db, summary_input)
+        .await
+        .map_err(|e| format!("Failed to save summary: {}", e))?;
+
+    Ok(ApiResponse::success(GenerateSummaryResponse {
+        summary_id,
+        key_points: result.key_points,
+        decisions: result.decisions,
+        action_items: result.action_items,
+        duration_seconds: result.duration_seconds,
+    }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -849,7 +936,9 @@ pub fn run() {
             check_whisper_model_command,
             download_whisper_model_command,
             list_whisper_models_command,
-            transcribe_audio_command
+            transcribe_audio_command,
+            check_ollama_status_command,
+            generate_summary_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
