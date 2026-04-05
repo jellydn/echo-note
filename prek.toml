@@ -1,0 +1,18 @@
+#:schema https://www.schemastore.org/prek.json
+
+[[repos]]
+repo = "builtin"
+hooks = [
+    { id = "trailing-whitespace" },
+    { id = "end-of-file-fixer" },
+    { id = "check-added-large-files", args = ["--maxkb=500"] },
+]
+
+[[repos]]
+repo = "local"
+hooks = [
+    { id = "biome-check", name = "biome check", entry = "npx @biomejs/biome check", language = "system", files = '\.([jt]sx?|json)$' },
+    { id = "typescript", name = "typecheck", entry = "bash -c 'npm run typecheck'", language = "system", files = '\.tsx?$', pass_filenames = false },
+    { id = "cargo-fmt", name = "cargo fmt", entry = "cargo fmt --manifest-path src-tauri/Cargo.toml --", language = "system", files = '\.rs$' },
+    { id = "cargo-clippy", name = "cargo clippy", entry = "cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings", language = "system", files = '\.rs$', pass_filenames = false },
+]

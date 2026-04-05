@@ -13,20 +13,22 @@ cargo check                          # Rust typecheck
 npm run typecheck                    # TypeScript typecheck
 
 # Lint
-npm run lint                         # ESLint + Prettier
-
+npm run lint                         # Biome
 cargo clippy                         # Rust linting
 cargo fmt --check                    # Rust format check
 
 # Build release
 cargo tauri build
 
-# Run single Rust test
+# Run Rust tests
 cargo test <test_name>             # Run specific test
-cargo test <module_name>::           # Run module tests
 
-# Run single TS test
-npm test -- <pattern>                # Run tests matching pattern
+# Alternative: use just for convenience commands
+just check                         # Run all checks
+just lint                          # Run all lints
+just fmt                           # Format everything
+
+# No frontend tests exist yet
 ```
 
 ## Code Style Guidelines
@@ -101,9 +103,7 @@ src/              # React frontend (TypeScript)
 src-tauri/        # Rust backend
   src/
     db/           # Database queries and migrations
-    audio/        # Audio recording (cpal)
-    whisper/      # Whisper transcription
-    ollama/       # LLM integration
+    gen/          # Auto-generated Tauri schemas (don't edit)
   migrations/     # SQLx migrations
 tasks/            # PRD and planning docs
 scripts/ralph/    # Autonomous agent scripts
@@ -115,6 +115,7 @@ scripts/ralph/    # Autonomous agent scripts
 2. **Lint clean**: `cargo clippy` (no warnings) and `npm run lint`
 3. **Format check**: `cargo fmt --check` passes
 4. **Single story focus**: Each commit addresses ONE user story from PRD
+5. **Pre-commit hooks**: Run `just pre-commit` to verify locally (uses prek)
 
 ## Commit Message Format
 
