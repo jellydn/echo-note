@@ -14,26 +14,23 @@ pub enum RecordingCommand {
     Stop,
 }
 
-/// Audio recording state
-#[derive(Debug, Clone)]
-pub struct RecordingState {
-    pub is_recording: bool,
-    pub start_time: Option<Instant>,
+/// Audio recording state for a single device
+#[derive(Debug, Clone, Default)]
+pub struct DeviceRecordingState {
     pub audio_data: Arc<Mutex<Vec<f32>>>,
     pub sample_rate: u32,
+    #[allow(dead_code)]
     pub channels: u16,
 }
 
-impl Default for RecordingState {
-    fn default() -> Self {
-        Self {
-            is_recording: false,
-            start_time: None,
-            audio_data: Arc::new(Mutex::new(Vec::new())),
-            sample_rate: 16000,
-            channels: 1,
-        }
-    }
+/// Overall recording state
+#[derive(Debug, Clone, Default)]
+pub struct RecordingState {
+    pub is_recording: bool,
+    pub start_time: Option<Instant>,
+    #[allow(dead_code)]
+    pub mic_state: DeviceRecordingState,
+    pub system_state: Option<DeviceRecordingState>,
 }
 
 /// Result of stopping a recording
@@ -41,20 +38,27 @@ impl Default for RecordingState {
 pub struct RecordingResult {
     pub file_path: String,
     pub duration_seconds: f64,
+    pub used_system_audio: bool,
 }
 
-/// Audio recorder that manages the recording thread
+/// Thread handle for a single recording
+struct RecordingThreadHandle {
+    command_sender: Sender<RecordingCommand>,
+    audio_thread: JoinHandle<Result<DeviceRecordingState>>,
+}
+
+/// Audio recorder that manages single or dual recording threads
 pub struct AudioRecorder {
-    command_sender: Option<Sender<RecordingCommand>>,
-    audio_thread: Option<JoinHandle<Result<RecordingState>>>,
+    mic_handle: Option<RecordingThreadHandle>,
+    system_handle: Option<RecordingThreadHandle>,
     state: Arc<Mutex<RecordingState>>,
 }
 
 impl AudioRecorder {
     pub fn new() -> Self {
         Self {
-            command_sender: None,
-            audio_thread: None,
+            mic_handle: None,
+            system_handle: None,
             state: Arc::new(Mutex::new(RecordingState::default())),
         }
     }
@@ -64,136 +68,303 @@ impl AudioRecorder {
         state.is_recording
     }
 
-    /// Start recording audio from the specified device
-    pub fn start_recording(&mut self, device_id: &str) -> Result<()> {
+    /// Start recording audio from the microphone and optionally from system audio
+    ///
+    /// # Arguments
+    /// * `mic_device_id` - The microphone device ID to record from
+    /// * `system_device_name` - Optional BlackHole device name for system audio capture
+    pub fn start_recording(
+        &mut self,
+        mic_device_id: &str,
+        system_device_name: Option<&str>,
+    ) -> Result<()> {
         if self.is_recording() {
             return Err(anyhow::anyhow!("Recording is already in progress"));
         }
 
-        // Create channels for communication
-        let (cmd_tx, cmd_rx) = channel::<RecordingCommand>();
+        // Create mic recording state
+        let mic_audio_data = Arc::new(Mutex::new(Vec::new()));
+        let mic_state = DeviceRecordingState {
+            audio_data: Arc::clone(&mic_audio_data),
+            sample_rate: 16000,
+            channels: 1,
+        };
 
-        // Reset state
-        let audio_data = Arc::new(Mutex::new(Vec::new()));
+        // Reset overall state
         let state = Arc::new(Mutex::new(RecordingState {
             is_recording: true,
             start_time: Some(Instant::now()),
-            audio_data: Arc::clone(&audio_data),
-            sample_rate: 16000,
-            channels: 1,
+            mic_state,
+            system_state: None,
         }));
 
-        let state_clone = Arc::clone(&state);
-        let device_id = device_id.to_string();
+        // Start microphone recording thread
+        let (mic_cmd_tx, mic_cmd_rx) = channel::<RecordingCommand>();
+        let mic_state_clone = Arc::clone(&state);
+        let mic_device_id = mic_device_id.to_string();
 
-        // Spawn the audio recording thread
-        let handle = thread::spawn(move || run_recording_thread(&device_id, cmd_rx, state_clone));
+        let mic_handle = thread::spawn(move || {
+            run_single_recording_thread(&mic_device_id, mic_cmd_rx, mic_audio_data, mic_state_clone)
+        });
 
-        self.command_sender = Some(cmd_tx);
-        self.audio_thread = Some(handle);
+        self.mic_handle = Some(RecordingThreadHandle {
+            command_sender: mic_cmd_tx,
+            audio_thread: mic_handle,
+        });
+
+        // Start system audio recording if BlackHole is available
+        if let Some(system_name) = system_device_name {
+            let system_audio_data = Arc::new(Mutex::new(Vec::new()));
+            let system_state = DeviceRecordingState {
+                audio_data: Arc::clone(&system_audio_data),
+                sample_rate: 16000,
+                channels: 1,
+            };
+
+            // Update state to include system audio
+            {
+                let mut state_guard = state.lock().unwrap();
+                state_guard.system_state = Some(system_state);
+            }
+
+            let (sys_cmd_tx, sys_cmd_rx) = channel::<RecordingCommand>();
+            let system_state_clone = Arc::clone(&state);
+            let system_name = system_name.to_string();
+
+            let system_handle = thread::spawn(move || {
+                run_single_recording_thread(
+                    &system_name,
+                    sys_cmd_rx,
+                    system_audio_data,
+                    system_state_clone,
+                )
+            });
+
+            self.system_handle = Some(RecordingThreadHandle {
+                command_sender: sys_cmd_tx,
+                audio_thread: system_handle,
+            });
+        }
+
         self.state = state;
-
         Ok(())
     }
 
     /// Stop recording and save to file
+    /// If both mic and system audio were recorded, they are mixed together
     pub fn stop_recording(&mut self, output_dir: PathBuf) -> Result<RecordingResult> {
         if !self.is_recording() {
             return Err(anyhow::anyhow!("No active recording to stop"));
         }
 
-        // Send stop command
-        if let Some(sender) = self.command_sender.take() {
-            sender.send(RecordingCommand::Stop)?;
+        // Send stop commands to all recording threads
+        if let Some(handle) = self.mic_handle.take() {
+            let _ = handle.command_sender.send(RecordingCommand::Stop);
+            // Wait for thread to complete (will be joined below)
         }
 
-        // Wait for thread to complete
-        if let Some(handle) = self.audio_thread.take() {
-            let final_state = handle
-                .join()
-                .map_err(|_| anyhow::anyhow!("Audio thread panicked"))??;
+        if let Some(handle) = self.system_handle.take() {
+            let _ = handle.command_sender.send(RecordingCommand::Stop);
+        }
 
-            // Save the recording
-            let duration = final_state
+        // Collect results from threads
+        let mut mic_data: Option<DeviceRecordingState> = None;
+        let mut system_data: Option<DeviceRecordingState> = None;
+
+        // Re-take handles to join them
+        if let Some(handle) = self.mic_handle.take() {
+            match handle.audio_thread.join() {
+                Ok(Ok(state)) => mic_data = Some(state),
+                Ok(Err(e)) => eprintln!("Mic recording error: {}", e),
+                Err(_) => eprintln!("Mic recording thread panicked"),
+            }
+        }
+
+        if let Some(handle) = self.system_handle.take() {
+            match handle.audio_thread.join() {
+                Ok(Ok(state)) => system_data = Some(state),
+                Ok(Err(e)) => eprintln!("System audio recording error: {}", e),
+                Err(_) => eprintln!("System audio recording thread panicked"),
+            }
+        }
+
+        // Get timing info
+        let duration = {
+            let state_guard = self.state.lock().unwrap();
+            state_guard
                 .start_time
                 .map(|t| t.elapsed().as_secs_f64())
-                .unwrap_or(0.0);
+                .unwrap_or(0.0)
+        };
 
-            // Get the audio data
-            let audio_data = final_state
+        // Mix audio data if we have both sources
+        let mixed_audio = if let (Some(mic), Some(sys)) = (&mic_data, &system_data) {
+            // Mix microphone and system audio
+            let mic_samples = mic
+                .audio_data
+                .lock()
+                .map_err(|e| anyhow::anyhow!("Failed to lock mic audio data: {}", e))?;
+            let sys_samples = sys
+                .audio_data
+                .lock()
+                .map_err(|e| anyhow::anyhow!("Failed to lock system audio data: {}", e))?;
+
+            mix_audio_streams(&mic_samples, &sys_samples, mic.sample_rate, sys.sample_rate)
+        } else if let Some(mic) = &mic_data {
+            // Mic only
+            let mic_samples = mic
                 .audio_data
                 .lock()
                 .map_err(|e| anyhow::anyhow!("Failed to lock audio data: {}", e))?;
+            mic_samples.clone()
+        } else {
+            return Err(anyhow::anyhow!("No audio data recorded"));
+        };
 
-            // Generate filename with timestamp
-            let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
-            let filename = format!("recording_{}.wav", timestamp);
-            let file_path = output_dir.join(&filename);
+        // Determine sample rate for output
+        let output_sample_rate = mic_data.as_ref().map(|s| s.sample_rate).unwrap_or(16000);
+        let used_system_audio = system_data.is_some();
 
-            // Create output directory if needed
-            std::fs::create_dir_all(&output_dir)?;
+        // Generate filename with timestamp
+        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+        let filename = format!("recording_{}.wav", timestamp);
+        let file_path = output_dir.join(&filename);
 
-            // Write WAV file
-            let spec = hound::WavSpec {
-                channels: 1,
-                sample_rate: final_state.sample_rate,
-                bits_per_sample: 16,
-                sample_format: hound::SampleFormat::Int,
-            };
+        // Create output directory if needed
+        std::fs::create_dir_all(&output_dir)?;
 
-            let mut writer = hound::WavWriter::create(&file_path, spec)
-                .context("Failed to create WAV writer")?;
+        // Write WAV file
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: output_sample_rate,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
 
-            // Convert f32 samples to i16 and write
-            for sample in audio_data.iter() {
-                let sample_i16 =
-                    (sample * i16::MAX as f32).clamp(i16::MIN as f32, i16::MAX as f32) as i16;
-                writer.write_sample(sample_i16)?;
-            }
+        let mut writer =
+            hound::WavWriter::create(&file_path, spec).context("Failed to create WAV writer")?;
 
-            writer.finalize().context("Failed to finalize WAV file")?;
-
-            let file_path_str = file_path
-                .to_str()
-                .ok_or_else(|| anyhow::anyhow!("Invalid file path"))?
-                .to_string();
-
-            // Update our state
-            let mut current_state = self.state.lock().unwrap();
-            *current_state = RecordingState::default();
-
-            return Ok(RecordingResult {
-                file_path: file_path_str,
-                duration_seconds: duration,
-            });
+        // Convert f32 samples to i16 and write
+        for sample in mixed_audio.iter() {
+            let sample_i16 = (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
+            writer.write_sample(sample_i16)?;
         }
 
-        Err(anyhow::anyhow!("Failed to stop recording"))
+        writer.finalize().context("Failed to finalize WAV file")?;
+
+        let file_path_str = file_path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid file path"))?
+            .to_string();
+
+        // Reset state
+        let mut current_state = self.state.lock().unwrap();
+        *current_state = RecordingState::default();
+
+        Ok(RecordingResult {
+            file_path: file_path_str,
+            duration_seconds: duration,
+            used_system_audio,
+        })
     }
 }
 
-/// The audio recording thread function
-fn run_recording_thread(
-    device_id: &str,
+/// Mix two audio streams together
+/// If sample rates differ, the second stream is resampled to match the first
+fn mix_audio_streams(
+    stream1: &[f32],
+    stream2: &[f32],
+    sample_rate1: u32,
+    sample_rate2: u32,
+) -> Vec<f32> {
+    // Determine the output length (longer of the two streams, adjusted for sample rate)
+    let len1 = stream1.len();
+    let len2 = if sample_rate1 == sample_rate2 {
+        stream2.len()
+    } else {
+        // Estimate resampled length
+        (stream2.len() as f64 * sample_rate1 as f64 / sample_rate2 as f64) as usize
+    };
+
+    let output_len = len1.max(len2);
+    let mut mixed = Vec::with_capacity(output_len);
+
+    for i in 0..output_len {
+        let sample1 = if i < len1 { stream1[i] } else { 0.0 };
+
+        // Get sample from stream2, with resampling if needed
+        let sample2 = if sample_rate1 == sample_rate2 {
+            if i < stream2.len() {
+                stream2[i]
+            } else {
+                0.0
+            }
+        } else {
+            // Simple linear interpolation for resampling
+            let pos = i as f64 * sample_rate2 as f64 / sample_rate1 as f64;
+            let idx = pos as usize;
+            let frac = pos - idx as f64;
+
+            if idx >= stream2.len() {
+                0.0
+            } else if idx + 1 >= stream2.len() {
+                stream2[idx]
+            } else {
+                let s1 = stream2[idx];
+                let s2 = stream2[idx + 1];
+                s1 + (s2 - s1) * frac as f32
+            }
+        };
+
+        // Mix with slight attenuation to prevent clipping
+        mixed.push((sample1 + sample2) * 0.75);
+    }
+
+    mixed
+}
+
+/// The audio recording thread function for a single device
+fn run_single_recording_thread(
+    device_id_or_name: &str,
     command_receiver: Receiver<RecordingCommand>,
+    audio_data: Arc<Mutex<Vec<f32>>>,
     state: Arc<Mutex<RecordingState>>,
-) -> Result<RecordingState> {
+) -> Result<DeviceRecordingState> {
     let host = cpal::default_host();
 
-    let device = if device_id == "default" {
+    // Find the device - try exact match first, then partial match
+    let device = if device_id_or_name == "default" {
         host.default_input_device()
             .context("No default input device available")?
     } else {
         let devices = host.input_devices().context("Failed to get devices")?;
         let mut found_device = None;
+
         for device in devices {
             if let Ok(name) = device.name() {
-                if device_id.contains(&name) || name.to_lowercase().contains("microphone") {
+                // Exact match
+                if name == device_id_or_name {
+                    found_device = Some(device);
+                    break;
+                }
+                // Partial match for BlackHole
+                if device_id_or_name.contains("BlackHole")
+                    && (name.contains("BlackHole") || name.contains("BlackHole2ch"))
+                {
+                    found_device = Some(device);
+                    break;
+                }
+                // Partial match for microphone
+                if device_id_or_name.contains("microphone")
+                    && (name.to_lowercase().contains("microphone")
+                        || name.to_lowercase().contains("mic"))
+                {
                     found_device = Some(device);
                     break;
                 }
             }
         }
+
         found_device.unwrap_or_else(|| {
             host.default_input_device()
                 .expect("No default input device")
@@ -207,18 +378,6 @@ fn run_recording_thread(
     let sample_rate = config.sample_rate().0;
     let channels = config.channels();
     let sample_format = config.sample_format();
-
-    // Update state with actual values
-    {
-        let mut state_guard = state.lock().unwrap();
-        state_guard.sample_rate = sample_rate;
-        state_guard.channels = channels;
-    }
-
-    let audio_data = {
-        let state_guard = state.lock().unwrap();
-        Arc::clone(&state_guard.audio_data)
-    };
 
     let audio_data_clone = Arc::clone(&audio_data);
     let should_stop = Arc::new(AtomicBool::new(false));
@@ -267,9 +426,12 @@ fn run_recording_thread(
     // Stream will be dropped here, which stops it
     drop(stream);
 
-    // Return the final state
-    let final_state = state.lock().unwrap().clone();
-    Ok(final_state)
+    // Return the recording state
+    Ok(DeviceRecordingState {
+        audio_data,
+        sample_rate,
+        channels,
+    })
 }
 
 /// Build an audio stream for recording

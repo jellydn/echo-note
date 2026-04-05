@@ -1021,6 +1021,7 @@ dependencies = [
  "chrono",
  "cpal",
  "hound",
+ "log",
  "serde",
  "serde_json",
  "sqlx",

@@ -5,15 +5,18 @@ EchoNote is a privacy-first native desktop app (macOS) built with **Tauri v2 + R
 ## Build & Development Commands
 
 ```bash
+# Install frontend dependencies
+bun install
+
 # Development - launches Tauri app with hot reload
 cargo tauri dev
 
 # Typecheck (Required before commits)
 cargo check                          # Rust typecheck
-npm run typecheck                    # TypeScript typecheck
+bun run typecheck                    # TypeScript typecheck
 
 # Lint
-npm run lint                         # Biome
+bun run lint                         # Biome
 cargo clippy                         # Rust linting
 cargo fmt --check                    # Rust format check
 
@@ -111,8 +114,8 @@ scripts/ralph/    # Autonomous agent scripts
 
 ## Quality Gates (Required for Commits)
 
-1. **Typecheck passes**: `cargo check && npm run typecheck`
-2. **Lint clean**: `cargo clippy` (no warnings) and `npm run lint`
+1. **Typecheck passes**: `cargo check && bun run typecheck`
+2. **Lint clean**: `cargo clippy` (no warnings) and `bun run lint`
 3. **Format check**: `cargo fmt --check` passes
 4. **Single story focus**: Each commit addresses ONE user story from PRD
 5. **Pre-commit hooks**: Run `just pre-commit` to verify locally (uses prek)

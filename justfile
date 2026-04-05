@@ -19,7 +19,7 @@ check: check-ts check-rs
 
 # TypeScript typecheck
 check-ts:
-    npm run typecheck
+    bun run typecheck
 
 # Rust typecheck
 check-rs:
@@ -57,5 +57,5 @@ test-rs *args:
 
 # Install dependencies
 setup:
-    npm install
+    bun install
     prek install

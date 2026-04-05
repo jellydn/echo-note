@@ -1,5 +1,6 @@
 mod audio;
 mod db;
+mod system_audio;
 
 use audio::{get_recordings_dir, list_audio_devices, AudioRecorder, RecordingResult};
 use db::{
@@ -13,6 +14,7 @@ use db::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
+use system_audio::{get_blackhole_device_name, is_blackhole_installed};
 use tauri::{Manager, State};
 
 /// Extended app state that includes audio recording
@@ -545,6 +547,7 @@ async fn delete_setting_command(
 struct RecordingResponse {
     file_path: String,
     duration_seconds: f64,
+    used_system_audio: bool,
 }
 
 impl From<RecordingResult> for RecordingResponse {
@@ -552,6 +555,7 @@ impl From<RecordingResult> for RecordingResponse {
         Self {
             file_path: result.file_path,
             duration_seconds: result.duration_seconds,
+            used_system_audio: result.used_system_audio,
         }
     }
 }
@@ -564,6 +568,7 @@ struct AudioDeviceInfo {
 }
 
 /// Start recording audio
+/// Records from microphone and optionally from BlackHole (system audio) if available
 #[tauri::command]
 async fn start_recording_command(
     state: State<'_, AppStateExt>,
@@ -574,6 +579,14 @@ async fn start_recording_command(
         .await
         .map_err(|e| format!("Failed to get audio device setting: {}", e))?;
 
+    // Check if BlackHole is available for system audio capture
+    let system_device_name = if is_blackhole_installed() {
+        get_blackhole_device_name()
+    } else {
+        log::warn!("BlackHole not installed - recording microphone only");
+        None
+    };
+
     // Start recording
     let mut recorder = state
         .audio_recorder
@@ -581,7 +594,7 @@ async fn start_recording_command(
         .map_err(|e| format!("Failed to lock audio recorder: {}", e))?;
 
     recorder
-        .start_recording(&device_id)
+        .start_recording(&device_id, system_device_name.as_deref())
         .map_err(|e| format!("Failed to start recording: {}", e))?;
 
     Ok(ApiResponse::success(true))
@@ -607,10 +620,7 @@ async fn stop_recording_command(
         .stop_recording(recordings_dir)
         .map_err(|e| format!("Failed to stop recording: {}", e))?;
 
-    Ok(ApiResponse::success(RecordingResponse {
-        file_path: result.file_path,
-        duration_seconds: result.duration_seconds,
-    }))
+    Ok(ApiResponse::success(result.into()))
 }
 
 /// List available audio input devices
@@ -624,6 +634,31 @@ async fn list_audio_devices_command() -> Result<ApiResponse<Vec<AudioDeviceInfo>
         .collect();
 
     Ok(ApiResponse::success(device_infos))
+}
+
+// ==================== BLACKHOLE SYSTEM AUDIO COMMANDS ====================
+
+/// Response for BlackHole status
+#[derive(Serialize, Clone)]
+struct BlackHoleStatusResponse {
+    installed: bool,
+    device_name: Option<String>,
+}
+
+/// Check if BlackHole virtual audio driver is installed
+#[tauri::command]
+async fn check_blackhole_status_command() -> Result<ApiResponse<BlackHoleStatusResponse>, String> {
+    let installed = is_blackhole_installed();
+    let device_name = if installed {
+        get_blackhole_device_name()
+    } else {
+        None
+    };
+
+    Ok(ApiResponse::success(BlackHoleStatusResponse {
+        installed,
+        device_name,
+    }))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -674,7 +709,8 @@ pub fn run() {
             delete_setting_command,
             start_recording_command,
             stop_recording_command,
-            list_audio_devices_command
+            list_audio_devices_command,
+            check_blackhole_status_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
