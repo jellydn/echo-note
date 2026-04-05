@@ -29,3 +29,5 @@ anyhow = "1"
 cpal = "0.15"
 hound = "3.5"
 log = "0.4"
+reqwest = { version = "0.12", features = ["stream"] }
+futures-util = "0.3"

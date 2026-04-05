@@ -1,6 +1,7 @@
 mod audio;
 mod db;
 mod system_audio;
+mod whisper;
 
 use audio::{get_recordings_dir, list_audio_devices, AudioRecorder, RecordingResult};
 use db::{
@@ -16,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use system_audio::{get_blackhole_device_name, is_blackhole_installed};
 use tauri::{Manager, State};
+use whisper::{download_whisper_model, get_models_info, is_model_downloaded, ModelInfo};
 
 /// Extended app state that includes audio recording
 pub struct AppStateExt {
@@ -661,6 +663,89 @@ async fn check_blackhole_status_command() -> Result<ApiResponse<BlackHoleStatusR
     }))
 }
 
+// ==================== WHISPER MODEL COMMANDS ====================
+
+/// Response for model download status
+#[derive(Serialize, Clone)]
+struct WhisperModelStatusResponse {
+    model_size: String,
+    is_downloaded: bool,
+    model_path: Option<String>,
+}
+
+/// Response for model info
+#[derive(Serialize, Clone)]
+struct WhisperModelInfoResponse {
+    size: String,
+    filename: String,
+    expected_size: u64,
+    is_downloaded: bool,
+    actual_size: Option<u64>,
+}
+
+impl From<ModelInfo> for WhisperModelInfoResponse {
+    fn from(info: ModelInfo) -> Self {
+        Self {
+            size: info.size,
+            filename: info.filename,
+            expected_size: info.expected_size,
+            is_downloaded: info.is_downloaded,
+            actual_size: info.actual_size,
+        }
+    }
+}
+
+/// Check if a Whisper model is downloaded
+#[tauri::command]
+async fn check_whisper_model_command(
+    app_handle: tauri::AppHandle,
+    model_size: String,
+) -> Result<ApiResponse<WhisperModelStatusResponse>, String> {
+    let is_downloaded = is_model_downloaded(&app_handle, &model_size)
+        .map_err(|e| format!("Failed to check model status: {}", e))?;
+
+    let model_path = if is_downloaded {
+        whisper::get_model_path(&app_handle, &model_size)
+            .map_err(|e| format!("Failed to get model path: {}", e))?
+            .map(|p| p.to_string_lossy().to_string())
+    } else {
+        None
+    };
+
+    Ok(ApiResponse::success(WhisperModelStatusResponse {
+        model_size,
+        is_downloaded,
+        model_path,
+    }))
+}
+
+/// Download a Whisper model
+#[tauri::command]
+async fn download_whisper_model_command(
+    app_handle: tauri::AppHandle,
+    model_size: String,
+) -> Result<ApiResponse<String>, String> {
+    let model_path = download_whisper_model(&app_handle, &model_size)
+        .await
+        .map_err(|e| format!("Failed to download model: {}", e))?;
+
+    Ok(ApiResponse::success(
+        model_path.to_string_lossy().to_string(),
+    ))
+}
+
+/// Get information about all available Whisper models
+#[tauri::command]
+async fn list_whisper_models_command(
+    app_handle: tauri::AppHandle,
+) -> Result<ApiResponse<Vec<WhisperModelInfoResponse>>, String> {
+    let models =
+        get_models_info(&app_handle).map_err(|e| format!("Failed to get models info: {}", e))?;
+
+    let responses: Vec<WhisperModelInfoResponse> = models.into_iter().map(|m| m.into()).collect();
+    Ok(ApiResponse::success(responses))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -710,7 +795,10 @@ pub fn run() {
             start_recording_command,
             stop_recording_command,
             list_audio_devices_command,
-            check_blackhole_status_command
+            check_blackhole_status_command,
+            check_whisper_model_command,
+            download_whisper_model_command,
+            list_whisper_models_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
