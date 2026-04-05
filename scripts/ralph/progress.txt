@@ -29,6 +29,12 @@ Started: Mon Apr  6 06:32:26 +08 2026
 - **Summary parsing**: Parse structured LLM output by extracting sections between markers (e.g., "KEY POINTS:", "DECISIONS:")
 - **LLM prompt engineering**: Use structured prompts with clear section markers for consistent output parsing
 - **API fallback pattern**: Check `llm_provider` setting, fetch API config from settings, route to appropriate implementation
+- **React hooks order**: Import hooks from React in alphabetical order (`useCallback`, `useEffect`, `useRef`, `useState`)
+- **Tauri invoke pattern**: Use `invoke<ApiResponse<T>>("command_name", { params })` for type-safe backend calls
+- **Modal UI pattern**: Use overlay div with `position: fixed` and `z-index` for modal dialogs
+- **CSS animations**: Use `@keyframes` with `animation` property for pulsing/recording indicators
+- **Timer display**: Use `font-variant-numeric: tabular-nums` for consistent-width numbers in timers
+- **Biome lint config**: Use `files.includes` with negative patterns (e.g., `!**/target`) to exclude build artifacts
 
 ---
 
@@ -324,4 +330,38 @@ Started: Mon Apr  6 06:32:26 +08 2026
   - **Thread blocking**: Use `tokio::task::spawn_blocking` for CPU-intensive transcription to avoid blocking async runtime
   - **Progress events**: Use `app_handle.emit()` to send progress updates during long-running operations
   - **Settings integration**: Fetch model size from settings table via `get_setting` with DEFAULT_WHISPER_MODEL_SIZE fallback
+---
+
+## [Mon Apr 7 2026 14:30:00 +08] - US-012
+- What was implemented:
+  - Created `RecordView.tsx` component with full recording UI functionality
+  - Implemented pulsing recording indicator with CSS animation
+  - Added recording timer showing MM:SS format during recording
+  - Large Start/Stop Recording button with gradient styling
+  - Post-recording modal for entering meeting title with default "Meeting — [date] [time]"
+  - Integration with Tauri commands: `start_recording_command`, `stop_recording_command`, `create_meeting_command`
+  - Error handling with visual error messages
+  - System audio badge shown when BlackHole was used
+  - Added `biome.json` configuration for proper linting
+  - Dark mode support for all Record view styles
+- Files changed:
+  - `src/components/RecordView.tsx` - New recording UI component
+  - `src/App.tsx` - Updated to use RecordView component
+  - `src/App.css` - Added Record view styles with animations and modal
+  - `biome.json` - New Biome configuration to exclude build artifacts
+- Quality checks passed:
+  - TypeScript typecheck: `tsc --noEmit` ✓
+  - Rust typecheck: `cargo check` ✓
+  - Rust lint: `cargo clippy` ✓
+  - Rust format: `cargo fmt --check` ✓
+  - Biome lint: `bun run lint` ✓
+  - Pre-commit hooks: all passed ✓
+- **Learnings for future iterations:**
+  - **Modal pattern**: Use overlay + content structure with z-index for modals
+  - **CSS animations**: Use `@keyframes` for pulsing effects (recording indicator)
+  - **Timer formatting**: Use `tabular-nums` font variant for consistent timer display
+  - **Tauri command integration**: Use `invoke<ApiResponse<T>>` pattern for type safety
+  - **Default title generation**: Use `toLocaleDateString` + `toLocaleTimeString` for user-friendly defaults
+  - **Component structure**: Keep state logic in component, pass callbacks to parent for navigation
+  - **Biome configuration**: Use `files.includes` with negative patterns to exclude `target/`, `node_modules/`, etc.
 ---
