@@ -518,3 +518,33 @@ Started: Mon Apr  6 06:32:26 +08 2026
   - **Auto-save pattern**: Save settings immediately on change with success feedback
   - **Future US-017**: Will enhance the model download UI with progress bar (download progress events)
 ---
+
+## [Sun Apr 6 2026 23:15:00 +08] - US-017
+- What was implemented:
+  - Enhanced SettingsView with real-time download progress bar for Whisper models
+  - Added Tauri event listener for `whisper-download-progress` events using `listen()` from `@tauri-apps/api/event`
+  - Created `DownloadProgress` interface with model_size, bytes_downloaded, total_bytes, percentage
+  - Added progress bar UI with visual fill and percentage text during model downloads
+  - Implemented first-launch prompt that appears when no Whisper model is downloaded (`needsModelDownload`)
+  - Added `model-download-progress` CSS with progress bar styling and dark mode support
+  - Added `model-prompt` CSS for first-launch notification with warning banner style
+  - Added proper event listener cleanup in useEffect return function to prevent memory leaks
+  - Auto-refresh model list and reset download state when download completes (100%)
+- Files changed:
+  - `src/components/SettingsView.tsx` - Added download progress listener, progress state, and UI
+  - `src/App.css` - Added progress bar styles and model prompt styles (light and dark mode)
+- Quality checks passed:
+  - TypeScript typecheck: `tsc --noEmit` ✓
+  - Rust typecheck: `cargo check` ✓
+  - Rust lint: `cargo clippy` ✓
+  - Rust format: `cargo fmt --check` ✓
+  - Biome lint: `bun run lint` ✓
+  - Pre-commit hooks: all passed ✓
+- **Learnings for future iterations:**
+  - **Tauri event cleanup**: Always return a cleanup function from useEffect that calls the unlisten function
+  - **useRef for unlisten**: Store the unlisten function in a ref to access it in the cleanup function
+  - **Progress bar pattern**: Use nested divs - outer for background track, inner for fill with percentage width
+  - **First-launch detection**: Check `modelInfo.some((m) => m.is_downloaded)` combined with `!isLoading`
+  - **Auto-refresh on complete**: Use setTimeout delay after 100% progress to allow file write completion
+  - **Progress events**: Backend emits every 5% via `app_handle.emit()`, frontend shows real-time updates
+---

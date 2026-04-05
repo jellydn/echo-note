@@ -1703,6 +1703,62 @@ body,
 	cursor: not-allowed;
 }
 
+/* Download Progress */
+.model-download-progress {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.model-download-progress .progress-bar {
+	flex: 1;
+	width: 100px;
+	height: 8px;
+	background-color: #e5e7eb;
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+.model-download-progress .progress-fill {
+	height: 100%;
+	background: linear-gradient(90deg, #1a1a2e, #3a3a5e);
+	border-radius: 4px;
+	transition: width 0.3s ease;
+}
+
+.model-download-progress .progress-text {
+	font-size: 0.875rem;
+	font-weight: 500;
+	color: #1a1a2e;
+	min-width: 40px;
+	text-align: right;
+}
+
+/* Model Download Prompt */
+.model-prompt {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 16px;
+	background-color: #fef3c7;
+	border: 1px solid #f59e0b;
+	border-radius: 8px;
+	margin-bottom: 16px;
+}
+
+.model-prompt .prompt-icon {
+	font-size: 1.5rem;
+}
+
+.model-prompt span {
+	font-size: 0.875rem;
+	color: #92400e;
+}
+
+.model-prompt strong {
+	font-weight: 600;
+}
+
 /* Provider Options */
 .provider-options {
 	display: flex;
@@ -1889,6 +1945,27 @@ body,
 
 	.model-download-button:hover:not(:disabled) {
 		background-color: #5a5a7a;
+	}
+
+	.model-download-progress .progress-bar {
+		background-color: #4a4a5a;
+	}
+
+	.model-download-progress .progress-fill {
+		background: linear-gradient(90deg, #4a4a6a, #6a6a8a);
+	}
+
+	.model-download-progress .progress-text {
+		color: #f6f6f6;
+	}
+
+	.model-prompt {
+		background-color: #3f3820;
+		border-color: #b45309;
+	}
+
+	.model-prompt span {
+		color: #fbbf24;
 	}
 
 	.provider-option {

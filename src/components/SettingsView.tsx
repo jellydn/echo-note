@@ -1,5 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useState } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+// Download progress event payload
+interface DownloadProgress {
+	model_size: string;
+	bytes_downloaded: number;
+	total_bytes: number;
+	percentage: number;
+}
 
 // Tauri API response wrapper
 interface ApiResponse<T> {
@@ -61,6 +70,10 @@ export function SettingsView() {
 	const [successMessage, setSuccessMessage] = useState<string | null>(null);
 	const [ollamaStatus, setOllamaStatus] = useState<OllamaStatusResponse | null>(null);
 	const [isDownloading, setIsDownloading] = useState<string | null>(null);
+
+	// Download progress state
+	const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
+	const unlistenRef = useRef<UnlistenFn | null>(null);
 
 	// Fetch all settings and data on mount
 	const loadSettings = useCallback(async () => {
@@ -140,6 +153,38 @@ export function SettingsView() {
 	useEffect(() => {
 		loadSettings();
 	}, [loadSettings]);
+
+	// Listen for download progress events
+	useEffect(() => {
+		const setupListener = async () => {
+			const unlisten = await listen<DownloadProgress>("whisper-download-progress", (event) => {
+				setDownloadProgress(event.payload);
+				// If download completed (100%), refresh model info
+				if (event.payload.percentage >= 100) {
+					// Small delay to let the file be fully written
+					setTimeout(async () => {
+						const modelsResponse = await invoke<ApiResponse<WhisperModelInfo[]>>(
+							"list_whisper_models_command",
+						);
+						if (modelsResponse.success && modelsResponse.data) {
+							setModelInfo(modelsResponse.data);
+						}
+						setIsDownloading(null);
+						setDownloadProgress(null);
+					}, 500);
+				}
+			});
+			unlistenRef.current = unlisten;
+		};
+
+		setupListener();
+
+		return () => {
+			if (unlistenRef.current) {
+				unlistenRef.current();
+			}
+		};
+	}, []);
 
 	// Save a setting value
 	const saveSetting = async (key: string, value: string) => {
@@ -234,10 +279,15 @@ export function SettingsView() {
 	};
 
 	// Get model display info
+
+	// Check if any model is downloaded (for first-launch prompt)
+	const hasAnyModelDownloaded = modelInfo.some((m) => m.is_downloaded);
+	const needsModelDownload = !hasAnyModelDownloaded && !isLoading;
+
+	// Get model display info
 	const getModelInfo = (size: string): WhisperModelInfo | undefined => {
 		return modelInfo.find((m) => m.size === size);
 	};
-
 	if (isLoading) {
 		return (
 			<div className="settings-view">
@@ -336,6 +386,18 @@ export function SettingsView() {
 										</div>
 										{isDownloaded ? (
 											<span className="model-status downloaded">✓ Downloaded</span>
+										) : isDownloadingThis ? (
+											<div className="model-download-progress">
+												<div className="progress-bar">
+													<div
+														className="progress-fill"
+														style={{ width: `${downloadProgress?.percentage ?? 0}%` }}
+													/>
+												</div>
+												<span className="progress-text">
+													{Math.round(downloadProgress?.percentage ?? 0)}%
+												</span>
+											</div>
 										) : (
 											<button
 												type="button"
@@ -343,13 +405,22 @@ export function SettingsView() {
 												onClick={() => downloadModel(size)}
 												disabled={isDownloading !== null}
 											>
-												{isDownloadingThis ? "Downloading..." : "Download"}
+												Download
 											</button>
 										)}
 									</div>
 								);
 							})}
 						</div>
+						{needsModelDownload && (
+							<div className="model-prompt">
+								<span className="prompt-icon">📥</span>
+								<span>
+									<strong>No model downloaded yet.</strong> Select a model above and click Download
+									to enable transcription.
+								</span>
+							</div>
+						)}
 						<p className="settings-hint">
 							Larger models are more accurate but slower. Small is recommended for most use cases.
 						</p>

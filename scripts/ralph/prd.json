@@ -71,8 +71,8 @@
 				"Typecheck passes"
 			],
 			"priority": 5,
-			"passes": true,
-			"notes": ""
+			"passes": false,
+			"notes": "BUG: stop_recording() in audio/mod.rs calls .take() on mic_handle and system_handle twice — first to send stop command (lines 161,166), then again to join threads (lines 175,183). Second .take() always returns None so thread results are never collected and audio data is lost. Fix: send stop command without taking, then take+join in the second block."
 		},
 		{
 			"id": "US-006",
@@ -227,8 +227,8 @@
 				"Verify in browser using dev-browser skill"
 			],
 			"priority": 15,
-			"passes": true,
-			"notes": "Implemented MeetingDetailView component with: inline editable title with save/cancel buttons, meeting meta display (date, duration), two-column grid layout with Summary and Transcript cards, structured summary sections (Key Points, Decisions, Action Items), scrollable transcript panel, copy-to-clipboard buttons with feedback, loading and error states, back button navigation, dark mode support"
+			"passes": false,
+			"notes": "BUG: Title editing in MeetingDetailView only updates local React state (line 154) — no update_meeting Tauri command exists in the backend, so title changes don't persist to SQLite. Fix: add update_meeting function to db/mod.rs, expose update_meeting_command in lib.rs, and call it from handleTitleSave in MeetingDetailView.tsx."
 		},
 		{
 			"id": "US-016",
@@ -262,8 +262,8 @@
 				"Verify in browser using dev-browser skill"
 			],
 			"priority": 17,
-			"passes": false,
-			"notes": ""
+			"passes": true,
+			"notes": "Already implemented within SettingsView (US-016): download button per model, progress bar via whisper-download-progress events, 'Downloaded' checkmark status, and needsModelDownload first-launch prompt. All acceptance criteria met."
 		}
 	]
 }
