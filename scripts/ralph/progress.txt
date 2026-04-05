@@ -22,6 +22,9 @@ Started: Mon Apr  6 06:32:26 +08 2026
 - **BlackHole detection**: Use system_profiler SPAudioDataType to detect BlackHole virtual audio device
 - **Audio mixing**: Mix multiple streams with attenuation (0.75 factor) to prevent clipping
 - **Resampling**: Linear interpolation for matching different sample rates between devices
+- **HTTP streaming downloads**: Use `reqwest::Client` with `bytes_stream()` and `futures_util::StreamExt` for large file downloads
+- **Progress events**: Use `app_handle.emit("event-name", payload)` to send progress updates to frontend
+- **Model management**: Store models in app data directory (`~Library/Application Support/echo-note/models/`) with Hugging Face URLs
 
 ---
 
@@ -177,4 +180,41 @@ Started: Mon Apr  6 06:32:26 +08 2026
   - **Audio mixing**: Mix multi-channel input to mono by averaging samples across channels.
   - **Device selection**: Get device_id from settings, fall back to cpal default_input_device().
   - **File naming**: Use chrono UTC timestamp for unique, sortable recording filenames.
+---
+
+## [Mon Apr 7 2026 07:45:00 +08] - US-008
+- What was implemented:
+  - Created `whisper` module for downloading and managing Whisper models
+  - Added `WHISPER_MODELS` constant with supported sizes (tiny, base, small, medium) and expected file sizes
+  - Added `DEFAULT_MODEL_SIZE` constant ("small")
+  - Implemented `get_models_dir()` to get/create the models directory in app data
+  - Implemented `get_model_filename()` to map model size to filename
+  - Implemented `is_model_downloaded()` to check if a model exists
+  - Implemented `get_model_path()` to get the full path to a model
+  - Implemented `download_whisper_model()` with:
+    - HTTP streaming download from Hugging Face (ggerganov/whisper.cpp)
+    - Progress tracking and Tauri events every 5%
+    - Final completion event
+  - Implemented `get_models_info()` to get status of all available models
+  - Created `ModelInfo` struct with download status and size info
+  - Added Tauri commands: `check_whisper_model_command`, `download_whisper_model_command`, `list_whisper_models_command`
+  - Added `DownloadProgress` event payload for frontend progress updates
+  - Added `reqwest` and `futures-util` dependencies for HTTP streaming
+- Files changed:
+  - `src-tauri/Cargo.toml` - Added `reqwest` and `futures-util` dependencies
+  - `src-tauri/src/whisper/mod.rs` - New module for Whisper model management (created)
+  - `src-tauri/src/lib.rs` - Added whisper module, imports, commands, and registered in invoke_handler
+- Quality checks passed:
+  - TypeScript typecheck: `tsc --noEmit` ✓
+  - Rust typecheck: `cargo check` ✓
+  - Rust lint: `cargo clippy` ✓
+  - Rust format: `cargo fmt --check` ✓
+  - Pre-commit hooks: all passed ✓
+- **Learnings for future iterations:**
+  - **Hugging Face model hosting**: Whisper models are hosted at `https://huggingface.co/ggerganov/whisper.cpp`
+  - **HTTP streaming downloads**: Use `reqwest::Client` with `bytes_stream()` and `futures_util::StreamExt`
+  - **Progress events**: Emit Tauri events using `app_handle.emit()` for frontend progress updates
+  - **File paths**: Use `PathBuf` and `to_string_lossy()` for cross-platform path handling
+  - **Model sizes**: tiny (~39MB), base (~74MB), small (~244MB), medium (~769MB)
+  - **Constants for future use**: Use `#[allow(dead_code)]` for constants that will be used in upcoming stories
 ---
