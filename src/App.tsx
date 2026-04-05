@@ -17,9 +17,10 @@ function App() {
 				return (
 					<RecordView
 						onMeetingCreated={(meetingId) => {
-							// Navigate to history and show the new meeting
+							// Navigate to meeting detail view after recording/processing completes
 							console.log("Meeting created:", meetingId);
-							setCurrentView("history");
+							setSelectedMeetingId(meetingId);
+							setCurrentView("meeting-detail");
 						}}
 					/>
 				);

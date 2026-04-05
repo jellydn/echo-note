@@ -924,7 +924,7 @@ async fn generate_summary_command(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -932,18 +932,20 @@ pub fn run() {
             tauri::async_runtime::block_on(async move {
                 let db_pool = db::init_db(&app_handle)
                     .await
-                    .expect("Failed to initialize database");
+                    .map_err(|e| format!("Failed to initialize database: {}", e))?;
 
                 // Initialize default settings
                 init_default_settings(&db_pool)
                     .await
-                    .expect("Failed to initialize default settings");
+                    .map_err(|e| format!("Failed to initialize default settings: {}", e))?;
 
                 app_handle.manage(AppStateExt {
                     db: db_pool,
                     audio_recorder: Mutex::new(AudioRecorder::new()),
                 });
-            });
+                Ok::<(), String>(())
+            })
+            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
             Ok(())
         })
@@ -979,7 +981,9 @@ pub fn run() {
             transcribe_audio_command,
             check_ollama_status_command,
             generate_summary_command
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        ]);
+
+    if let Err(err) = app.run(tauri::generate_context!()) {
+        eprintln!("error while running tauri application: {}", err);
+    }
 }

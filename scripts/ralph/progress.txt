@@ -1,6 +1,23 @@
 ---
 
-## [Mon Apr 7 2026 18:00:00 +08] - US-006
+## [Sat Apr 5 2025 07:45:00 UTC] - US-013
+- What was implemented:
+  - Fixed the post-recording navigation regression
+  - Updated `App.tsx` `onMeetingCreated` callback to navigate to `meeting-detail` view instead of `history`
+  - The callback now correctly sets `selectedMeetingId` before navigating, matching the pattern used in HistoryView's `onMeetingClick`
+  - This fulfills the PRD requirement: "On completion, navigate to the meeting detail view"
+- Files changed:
+  - `src/App.tsx` - Modified `onMeetingCreated` callback in the RecordView case (lines 18-23)
+- Quality checks passed:
+  - TypeScript typecheck: `tsc --noEmit` ✓
+  - Biome lint: `bun run lint` ✓
+  - Rust typecheck: `cargo check` (in src-tauri) ✓
+  - Rust lint: `cargo clippy` (in src-tauri) ✓
+- **Learnings for future iterations:**
+  - **Navigation pattern**: When navigating to a detail view, always set the ID state before changing the view state
+  - **Callback prop consistency**: The `onMeetingCreated` callback in RecordView passes `meetingId: number`, but App.tsx was ignoring it - always verify callback signatures match implementation
+  - **State ordering**: Set `selectedMeetingId(meetingId)` before `setCurrentView("meeting-detail")` to avoid race conditions where the view renders before the ID is available
+  - **Pattern to follow**: See `HistoryView.onMeetingClick` for the correct navigation pattern to detail views
 - What was implemented:
   - Fixed the audio device selection bug where non-default selections fell back to default
   - Changed `list_audio_devices()` in `src-tauri/src/audio/mod.rs` to use actual CoreAudio device names as IDs

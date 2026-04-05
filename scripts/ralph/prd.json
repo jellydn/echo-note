@@ -194,8 +194,8 @@
 				"Verify in browser using dev-browser skill"
 			],
 			"priority": 13,
-			"passes": false,
-			"notes": "Behavioral regression: after summary completion or Skip Summary, RecordView invokes onMeetingCreated(meetingId) in src/components/RecordView.tsx:167-188, but App.tsx ignores the meetingId and routes to History at src/App.tsx:18-23. The PRD requires navigation to the meeting detail view on completion."
+			"passes": true,
+			"notes": "Fixed navigation: App.tsx now correctly navigates to meeting-detail view when onMeetingCreated is called from RecordView. Previously it was routing to History instead of the detail view."
 		},
 		{
 			"id": "US-014",
