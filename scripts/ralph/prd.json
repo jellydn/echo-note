@@ -227,8 +227,8 @@
 				"Verify in browser using dev-browser skill"
 			],
 			"priority": 15,
-			"passes": false,
-			"notes": "BUG: title editing in MeetingDetailView only updates local React state at src/components/MeetingDetailView.tsx:142-155. No update_meeting storage function or Tauri command exists, so renamed meetings revert on refresh and are never persisted to SQLite."
+			"passes": true,
+			"notes": "Fixed: Added update_meeting storage function in db/mod.rs, exposed update_meeting_command in lib.rs, and updated handleTitleSave in MeetingDetailView.tsx to persist title changes to SQLite."
 		},
 		{
 			"id": "US-016",

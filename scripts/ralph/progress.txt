@@ -572,3 +572,30 @@ Started: Mon Apr  6 06:32:26 +08 2026
   - **Auto-refresh on complete**: Use setTimeout delay after 100% progress to allow file write completion
   - **Progress events**: Backend emits every 5% via `app_handle.emit()`, frontend shows real-time updates
 ---
+
+## [Mon Apr 7 2026 17:15:00 +08] - US-015 (Bug Fix)
+- What was implemented:
+  - Fixed the title editing bug in MeetingDetailView where changes only updated local React state
+  - Added `update_meeting` function to `src-tauri/src/db/mod.rs` for updating meeting titles in SQLite
+  - Added `update_meeting_command` Tauri command in `src-tauri/src/lib.rs` with proper error handling
+  - Registered `update_meeting_command` in the Tauri invoke_handler
+  - Updated `handleTitleSave` in `MeetingDetailView.tsx` to call `update_meeting_command` instead of just updating local state
+  - Implemented proper error handling with user feedback when title update fails
+- Files changed:
+  - `src-tauri/src/db/mod.rs` - Added update_meeting function for updating meeting title
+  - `src-tauri/src/lib.rs` - Added update_meeting_command and registered it in invoke_handler
+  - `src/components/MeetingDetailView.tsx` - Updated handleTitleSave to persist title changes
+- Quality checks passed:
+  - TypeScript typecheck: `tsc --noEmit` ✓
+  - Rust typecheck: `cargo check` ✓
+  - Rust lint: `cargo clippy` ✓
+  - Rust format: `cargo fmt --check` ✓
+  - Biome lint: `bun run lint` ✓
+  - Pre-commit hooks: all passed ✓
+- **Learnings for future iterations:**
+  - **Full-stack bug fixes require 3 layers**: Database function → Tauri command → Frontend call
+  - **Response pattern on update**: Fetch and return updated record after UPDATE for consistent UI state
+  - **Transaction-like updates**: When updating via Tauri, replace local state with server response to ensure consistency
+  - **Error UX**: Show inline error message when save fails, don't close edit mode so user can retry
+  - **Form validation**: Check if title actually changed before making API call (early return pattern)
+---
