@@ -84,8 +84,8 @@
 				"Typecheck passes"
 			],
 			"priority": 6,
-			"passes": false,
-			"notes": ""
+			"passes": true,
+			"notes": "Implemented as part of US-005 - list_audio_devices_command was added"
 		},
 		{
 			"id": "US-007",
