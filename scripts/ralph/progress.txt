@@ -25,7 +25,49 @@ Started: Mon Apr  6 06:32:26 +08 2026
 - **HTTP streaming downloads**: Use `reqwest::Client` with `bytes_stream()` and `futures_util::StreamExt` for large file downloads
 - **Progress events**: Use `app_handle.emit("event-name", payload)` to send progress updates to frontend
 - **Model management**: Store models in app data directory (`~Library/Application Support/echo-note/models/`) with Hugging Face URLs
+- **LLM integration**: Use `reqwest` with `json` feature for POST requests to Ollama API
+- **Summary parsing**: Parse structured LLM output by extracting sections between markers (e.g., "KEY POINTS:", "DECISIONS:")
+- **LLM prompt engineering**: Use structured prompts with clear section markers for consistent output parsing
 
+---
+
+## [Mon Apr 7 2026 08:30:00 +08] - US-010
+- What was implemented:
+  - Created `llm` module for Ollama integration and summary generation
+  - Added `DEFAULT_OLLAMA_URL` constant (http://localhost:11434)
+  - Added `DEFAULT_SUMMARY_MODEL` constant (llama3.2)
+  - Implemented `generate_summary()` function:
+    - Sends transcript to Ollama /api/generate endpoint
+    - Uses structured prompt requesting Key Points, Decisions, and Action Items
+    - Returns parsed summary with duration tracking
+  - Implemented `check_ollama_status()` to verify Ollama availability
+  - Added `SummaryResult` struct for structured summary output
+  - Implemented `parse_summary_response()` to extract sections from LLM output
+  - Created Tauri commands:
+    - `generate_summary_command`: Generates and saves summary to database
+    - `check_ollama_status_command`: Checks if Ollama is running
+  - Added `GenerateSummaryResponse` and `OllamaStatusResponse` structs
+  - Registered new commands in invoke_handler
+  - Added `json` feature to reqwest in Cargo.toml for JSON API support
+- Files changed:
+  - `src-tauri/Cargo.toml` - Added `json` feature to reqwest
+  - `src-tauri/src/llm/mod.rs` - New LLM module with Ollama integration (created)
+  - `src-tauri/src/lib.rs` - Added llm module, imports, commands, and registered in invoke_handler
+- Quality checks passed:
+  - TypeScript typecheck: `tsc --noEmit` ✓
+  - Rust typecheck: `cargo check` ✓
+  - Rust lint: `cargo clippy` ✓
+  - Rust format: `cargo fmt --check` ✓
+  - Pre-commit hooks: all passed ✓
+- **Learnings for future iterations:**
+  - **Ollama API pattern**: Use `/api/generate` endpoint with JSON payload: `{model, prompt, stream: false, options}`
+  - **LLM prompt structure**: Use clear section markers (e.g., "KEY POINTS:") for easier parsing
+  - **Summary parsing strategy**: Use `find()` with optional end markers to extract sections flexibly
+  - **Default model**: Using `llama3.2` as default for good balance of speed and quality
+  - **reqwest json feature**: Must enable `json` feature in Cargo.toml for `.json()` method on RequestBuilder
+  - **Error handling**: Provide helpful error messages when Ollama is not running (connection refused)
+  - **Future US-011**: Will add API fallback support (OpenAI-compatible endpoint) based on `llm_provider` setting
+  - **Future US-016**: Will allow configuring model selection via settings UI
 ---
 
 ## [Mon Apr 7 2026 07:15:00 +08] - US-007
