@@ -1,5 +1,6 @@
 import { useState } from "react";
 import "./App.css";
+import { RecordView } from "./components/RecordView";
 
 type View = "record" | "history" | "settings";
 
@@ -10,10 +11,13 @@ function App() {
 		switch (currentView) {
 			case "record":
 				return (
-					<div className="view-container">
-						<h2>Record</h2>
-						<p>Recording interface will be implemented here.</p>
-					</div>
+					<RecordView
+						onMeetingCreated={(meetingId) => {
+							// Navigate to history and show the new meeting
+							console.log("Meeting created:", meetingId);
+							setCurrentView("history");
+						}}
+					/>
 				);
 			case "history":
 				return (

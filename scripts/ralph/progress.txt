@@ -28,7 +28,36 @@ Started: Mon Apr  6 06:32:26 +08 2026
 - **LLM integration**: Use `reqwest` with `json` feature for POST requests to Ollama API
 - **Summary parsing**: Parse structured LLM output by extracting sections between markers (e.g., "KEY POINTS:", "DECISIONS:")
 - **LLM prompt engineering**: Use structured prompts with clear section markers for consistent output parsing
+- **API fallback pattern**: Check `llm_provider` setting, fetch API config from settings, route to appropriate implementation
 
+---
+
+## [Mon Apr 7 2026 10:00:00 +08] - US-011
+- What was implemented:
+  - Made `generate_summary_api` function public in `llm/mod.rs`
+  - Added `#[allow(dead_code)]` to `PROVIDER_OLLAMA` constant for future use
+  - Updated `generate_summary_command` in `lib.rs` to support both Ollama and API providers:
+    - Reads `llm_provider` setting to determine which provider to use
+    - For API provider: reads `api_key` and `api_endpoint` from settings
+    - Validates that API key is provided when using API provider
+    - Uses `gpt-4o-mini` as default model for API provider
+    - Routes to `generate_summary_api()` for API provider, `generate_summary()` for Ollama
+  - Updated imports to include `generate_summary_api` and `PROVIDER_API` constants
+- Files changed:
+  - `src-tauri/src/llm/mod.rs` - Made `generate_summary_api` public, added dead_code allow
+  - `src-tauri/src/lib.rs` - Updated `generate_summary_command` to support API provider
+- Quality checks passed:
+  - TypeScript typecheck: `tsc --noEmit` ✓
+  - Rust typecheck: `cargo check` ✓
+  - Rust lint: `cargo clippy` ✓
+  - Rust format: `cargo fmt --check` ✓
+  - Pre-commit hooks: all passed ✓
+- **Learnings for future iterations:**
+  - **API fallback pattern**: Check provider setting, fetch relevant config from database, route to appropriate implementation
+  - **API model choice**: Using `gpt-4o-mini` as default for API provider (good balance of quality/speed/cost)
+  - **Error handling**: Provide clear error messages when API key is missing
+  - **Same parsing**: Both Ollama and API paths use the same `parse_summary_response()` function
+  - **Future US-016**: Will add UI for configuring API endpoint and key in Settings view
 ---
 
 ## [Mon Apr 7 2026 08:30:00 +08] - US-010
@@ -107,7 +136,7 @@ Started: Mon Apr  6 06:32:26 +08 2026
   - **Mutex poisoning**: Handle potential mutex poisoning gracefully when threads panic
 ---
 
-## [Mon Apr 6 06:45:00 +08 2026] - US-001
+## [Mon Apr 6 2025 06:45:00 +08] - US-001
 - What was implemented:
   - Initialized Tauri v2 + React + TypeScript project using `npm create tauri-app@latest`
   - Created shell layout with sidebar navigation (Record, History, Settings)
