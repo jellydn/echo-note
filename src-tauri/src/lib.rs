@@ -17,7 +17,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use system_audio::{get_blackhole_device_name, is_blackhole_installed};
 use tauri::{Manager, State};
-use whisper::{download_whisper_model, get_models_info, is_model_downloaded, ModelInfo};
+use whisper::{
+    download_whisper_model, get_models_info, is_model_downloaded, transcribe_audio, ModelInfo,
+};
 
 /// Extended app state that includes audio recording
 pub struct AppStateExt {
@@ -746,6 +748,54 @@ async fn list_whisper_models_command(
     Ok(ApiResponse::success(responses))
 }
 
+// ==================== TRANSCRIPTION COMMANDS ====================
+
+/// Transcription response for Tauri commands
+#[derive(Serialize, Clone)]
+struct TranscriptionResponse {
+    transcript_id: i64,
+    text: String,
+    duration_seconds: f64,
+}
+
+/// Transcribe audio file and save transcript to database
+#[tauri::command]
+async fn transcribe_audio_command(
+    state: State<'_, AppStateExt>,
+    app_handle: tauri::AppHandle,
+    meeting_id: i64,
+    audio_path: String,
+) -> Result<ApiResponse<TranscriptionResponse>, String> {
+    // Get the model size from settings
+    let model_size = get_setting(&state.db, "whisper_model_size", DEFAULT_WHISPER_MODEL_SIZE)
+        .await
+        .map_err(|e| format!("Failed to get model size setting: {}", e))?;
+
+    // Run transcription
+    let result = tokio::task::spawn_blocking(move || {
+        transcribe_audio(&app_handle, &audio_path, &model_size)
+    })
+    .await
+    .map_err(|e| format!("Transcription task failed: {}", e))?
+    .map_err(|e| format!("Transcription failed: {}", e))?;
+
+    // Save transcript to database
+    let transcript_input = CreateTranscriptInput {
+        meeting_id,
+        content: result.text.clone(),
+    };
+
+    let transcript_id = create_transcript(&state.db, transcript_input)
+        .await
+        .map_err(|e| format!("Failed to save transcript: {}", e))?;
+
+    Ok(ApiResponse::success(TranscriptionResponse {
+        transcript_id,
+        text: result.text,
+        duration_seconds: result.duration_seconds,
+    }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -798,7 +848,8 @@ pub fn run() {
             check_blackhole_status_command,
             check_whisper_model_command,
             download_whisper_model_command,
-            list_whisper_models_command
+            list_whisper_models_command,
+            transcribe_audio_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
