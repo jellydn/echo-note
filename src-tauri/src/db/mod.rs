@@ -77,11 +77,6 @@ pub const DEFAULT_LLM_PROVIDER: &str = "ollama";
 pub const DEFAULT_API_KEY: &str = "";
 pub const DEFAULT_API_ENDPOINT: &str = "https://api.openai.com/v1";
 
-/// Application state containing the database pool
-pub struct AppState {
-    pub db: Pool<Sqlite>,
-}
-
 /// Initialize the database pool and create tables if they don't exist
 pub async fn init_db(app_handle: &tauri::AppHandle) -> Result<Pool<Sqlite>> {
     let app_dir = app_handle

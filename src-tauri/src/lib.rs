@@ -1,16 +1,25 @@
+mod audio;
 mod db;
 
+use audio::{get_recordings_dir, list_audio_devices, AudioRecorder, RecordingResult};
 use db::{
     create_meeting, create_summary, create_transcript, delete_meeting, delete_setting,
     delete_summary, delete_transcript, get_meeting, get_setting, get_summary,
     get_summary_by_meeting, get_transcript, get_transcript_by_meeting, init_default_settings,
     list_meetings, list_settings, list_summaries, list_transcripts, set_setting, update_summary,
-    update_transcript, AppState, CreateMeetingInput, CreateSummaryInput, CreateTranscriptInput,
+    update_transcript, CreateMeetingInput, CreateSummaryInput, CreateTranscriptInput,
     DEFAULT_API_ENDPOINT, DEFAULT_API_KEY, DEFAULT_AUDIO_DEVICE, DEFAULT_LLM_PROVIDER,
     DEFAULT_WHISPER_MODEL_SIZE,
 };
 use serde::{Deserialize, Serialize};
+use std::sync::Mutex;
 use tauri::{Manager, State};
+
+/// Extended app state that includes audio recording
+pub struct AppStateExt {
+    pub db: sqlx::Pool<sqlx::Sqlite>,
+    pub audio_recorder: Mutex<AudioRecorder>,
+}
 
 /// Response wrapper for consistent API responses
 #[derive(Serialize)]
@@ -73,7 +82,7 @@ impl From<db::Meeting> for MeetingResponse {
 
 #[tauri::command]
 async fn create_meeting_command(
-    state: State<'_, AppState>,
+    state: State<'_, AppStateExt>,
     request: CreateMeetingRequest,
 ) -> Result<ApiResponse<MeetingResponse>, String> {
     let date = chrono::DateTime::parse_from_rfc3339(&request.date)
@@ -102,7 +111,7 @@ async fn create_meeting_command(
 
 #[tauri::command]
 async fn get_meeting_command(
-    state: State<'_, AppState>,
+    state: State<'_, AppStateExt>,
     id: i64,
 ) -> Result<ApiResponse<MeetingResponse>, String> {
     let meeting = get_meeting(&state.db, id)
@@ -120,7 +129,7 @@ async fn get_meeting_command(
 
 #[tauri::command]
 async fn list_meetings_command(
-    state: State<'_, AppState>,
+    state: State<'_, AppStateExt>,
 ) -> Result<ApiResponse<Vec<MeetingResponse>>, String> {
     let meetings = list_meetings(&state.db)
         .await
@@ -132,7 +141,7 @@ async fn list_meetings_command(
 
 #[tauri::command]
 async fn delete_meeting_command(
-    state: State<'_, AppState>,
+    state: State<'_, AppStateExt>,
     id: i64,
 ) -> Result<ApiResponse<bool>, String> {
     let deleted = delete_meeting(&state.db, id)
@@ -180,7 +189,7 @@ impl From<db::Transcript> for TranscriptResponse {
 
 #[tauri::command]
 async fn create_transcript_command(
-    state: State<'_, AppState>,
+    state: State<'_, AppStateExt>,
     request: CreateTranscriptRequest,
 ) -> Result<ApiResponse<TranscriptResponse>, String> {
     let input = CreateTranscriptInput {
@@ -202,7 +211,7 @@ async fn create_transcript_command(
 
 #[tauri::command]
 async fn get_transcript_command(
-    state: State<'_, AppState>,
+    state: State<'_, AppStateExt>,
     id: i64,
 ) -> Result<ApiResponse<TranscriptResponse>, String> {
     let transcript = get_transcript(&state.db, id)
@@ -220,7 +229,7 @@ async fn get_transcript_command(
 
 #[tauri::command]
 async fn get_transcript_by_meeting_command(
-    state: State<'_, AppState>,
+    state: State<'_, AppStateExt>,
     meeting_id: i64,
 ) -> Result<ApiResponse<Option<TranscriptResponse>>, String> {
     let transcript = get_transcript_by_meeting(&state.db, meeting_id)
@@ -232,7 +241,7 @@ async fn get_transcript_by_meeting_command(
 
 #[tauri::command]
 async fn list_transcripts_command(
-    state: State<'_, AppState>,
+    state: State<'_, AppStateExt>,
 ) -> Result<ApiResponse<Vec<TranscriptResponse>>, String> {
     let transcripts = list_transcripts(&state.db)
         .await
@@ -244,7 +253,7 @@ async fn list_transcripts_command(
 
 #[tauri::command]
 async fn update_transcript_command(
-    state: State<'_, AppState>,
+    state: State<'_, AppStateExt>,
     id: i64,
     content: String,
 ) -> Result<ApiResponse<bool>, String> {
@@ -264,7 +273,7 @@ async fn update_transcript_command(
 
 #[tauri::command]
 async fn delete_transcript_command(
-    state: State<'_, AppState>,
+    state: State<'_, AppStateExt>,
     id: i64,
 ) -> Result<ApiResponse<bool>, String> {
     let deleted = delete_transcript(&state.db, id)
@@ -318,7 +327,7 @@ impl From<db::Summary> for SummaryResponse {
 
 #[tauri::command]
 async fn create_summary_command(
-    state: State<'_, AppState>,
+    state: State<'_, AppStateExt>,
     request: CreateSummaryRequest,
 ) -> Result<ApiResponse<SummaryResponse>, String> {
     let input = CreateSummaryInput {
@@ -342,7 +351,7 @@ async fn create_summary_command(
 
 #[tauri::command]
 async fn get_summary_command(
-    state: State<'_, AppState>,
+    state: State<'_, AppStateExt>,
     id: i64,
 ) -> Result<ApiResponse<SummaryResponse>, String> {
     let summary = get_summary(&state.db, id)
@@ -360,7 +369,7 @@ async fn get_summary_command(
 
 #[tauri::command]
 async fn get_summary_by_meeting_command(
-    state: State<'_, AppState>,
+    state: State<'_, AppStateExt>,
     meeting_id: i64,
 ) -> Result<ApiResponse<Option<SummaryResponse>>, String> {
     let summary = get_summary_by_meeting(&state.db, meeting_id)
@@ -372,7 +381,7 @@ async fn get_summary_by_meeting_command(
 
 #[tauri::command]
 async fn list_summaries_command(
-    state: State<'_, AppState>,
+    state: State<'_, AppStateExt>,
 ) -> Result<ApiResponse<Vec<SummaryResponse>>, String> {
     let summaries = list_summaries(&state.db)
         .await
@@ -384,7 +393,7 @@ async fn list_summaries_command(
 
 #[tauri::command]
 async fn update_summary_command(
-    state: State<'_, AppState>,
+    state: State<'_, AppStateExt>,
     id: i64,
     key_points: String,
     decisions: String,
@@ -406,7 +415,7 @@ async fn update_summary_command(
 
 #[tauri::command]
 async fn delete_summary_command(
-    state: State<'_, AppState>,
+    state: State<'_, AppStateExt>,
     id: i64,
 ) -> Result<ApiResponse<bool>, String> {
     let deleted = delete_summary(&state.db, id)
@@ -456,7 +465,7 @@ struct GetSettingRequest {
 /// Get a setting by key, returning default value if not found
 #[tauri::command]
 async fn get_setting_command(
-    state: State<'_, AppState>,
+    state: State<'_, AppStateExt>,
     request: GetSettingRequest,
 ) -> Result<ApiResponse<String>, String> {
     // Determine default value based on key
@@ -486,7 +495,7 @@ struct SetSettingRequest {
 /// Set a setting value (insert or update)
 #[tauri::command]
 async fn set_setting_command(
-    state: State<'_, AppState>,
+    state: State<'_, AppStateExt>,
     request: SetSettingRequest,
 ) -> Result<ApiResponse<bool>, String> {
     let success = set_setting(&state.db, &request.key, &request.value)
@@ -499,7 +508,7 @@ async fn set_setting_command(
 /// List all settings
 #[tauri::command]
 async fn list_settings_command(
-    state: State<'_, AppState>,
+    state: State<'_, AppStateExt>,
 ) -> Result<ApiResponse<Vec<SettingResponse>>, String> {
     let settings = list_settings(&state.db)
         .await
@@ -512,7 +521,7 @@ async fn list_settings_command(
 /// Delete a setting by key
 #[tauri::command]
 async fn delete_setting_command(
-    state: State<'_, AppState>,
+    state: State<'_, AppStateExt>,
     key: String,
 ) -> Result<ApiResponse<bool>, String> {
     let deleted = delete_setting(&state.db, &key)
@@ -527,6 +536,94 @@ async fn delete_setting_command(
             key
         )))
     }
+}
+
+// ==================== AUDIO RECORDING COMMANDS ====================
+
+/// Response for recording result
+#[derive(Serialize, Clone)]
+struct RecordingResponse {
+    file_path: String,
+    duration_seconds: f64,
+}
+
+impl From<RecordingResult> for RecordingResponse {
+    fn from(result: RecordingResult) -> Self {
+        Self {
+            file_path: result.file_path,
+            duration_seconds: result.duration_seconds,
+        }
+    }
+}
+
+/// Audio device info
+#[derive(Serialize, Clone)]
+struct AudioDeviceInfo {
+    id: String,
+    name: String,
+}
+
+/// Start recording audio
+#[tauri::command]
+async fn start_recording_command(
+    state: State<'_, AppStateExt>,
+    _app_handle: tauri::AppHandle,
+) -> Result<ApiResponse<bool>, String> {
+    // Get the audio device from settings
+    let device_id = get_setting(&state.db, "audio_device", DEFAULT_AUDIO_DEVICE)
+        .await
+        .map_err(|e| format!("Failed to get audio device setting: {}", e))?;
+
+    // Start recording
+    let mut recorder = state
+        .audio_recorder
+        .lock()
+        .map_err(|e| format!("Failed to lock audio recorder: {}", e))?;
+
+    recorder
+        .start_recording(&device_id)
+        .map_err(|e| format!("Failed to start recording: {}", e))?;
+
+    Ok(ApiResponse::success(true))
+}
+
+/// Stop recording audio and save to file
+#[tauri::command]
+async fn stop_recording_command(
+    state: State<'_, AppStateExt>,
+    app_handle: tauri::AppHandle,
+) -> Result<ApiResponse<RecordingResponse>, String> {
+    // Get the recordings directory
+    let recordings_dir = get_recordings_dir(&app_handle)
+        .map_err(|e| format!("Failed to get recordings directory: {}", e))?;
+
+    // Stop recording
+    let mut recorder = state
+        .audio_recorder
+        .lock()
+        .map_err(|e| format!("Failed to lock audio recorder: {}", e))?;
+
+    let result = recorder
+        .stop_recording(recordings_dir)
+        .map_err(|e| format!("Failed to stop recording: {}", e))?;
+
+    Ok(ApiResponse::success(RecordingResponse {
+        file_path: result.file_path,
+        duration_seconds: result.duration_seconds,
+    }))
+}
+
+/// List available audio input devices
+#[tauri::command]
+async fn list_audio_devices_command() -> Result<ApiResponse<Vec<AudioDeviceInfo>>, String> {
+    let devices = list_audio_devices().map_err(|e| format!("Failed to list devices: {}", e))?;
+
+    let device_infos: Vec<AudioDeviceInfo> = devices
+        .into_iter()
+        .map(|(id, name)| AudioDeviceInfo { id, name })
+        .collect();
+
+    Ok(ApiResponse::success(device_infos))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -546,7 +643,10 @@ pub fn run() {
                     .await
                     .expect("Failed to initialize default settings");
 
-                app_handle.manage(AppState { db: db_pool });
+                app_handle.manage(AppStateExt {
+                    db: db_pool,
+                    audio_recorder: Mutex::new(AudioRecorder::new()),
+                });
             });
 
             Ok(())
@@ -571,7 +671,10 @@ pub fn run() {
             get_setting_command,
             set_setting_command,
             list_settings_command,
-            delete_setting_command
+            delete_setting_command,
+            start_recording_command,
+            stop_recording_command,
+            list_audio_devices_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

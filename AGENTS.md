@@ -128,6 +128,7 @@ Example: `feat: US-001 - Initialize Tauri + React project scaffold`
 ## Useful Context
 
 - **Audio capture**: Uses `cpal` crate, saves WAV to app data directory
+- **Audio thread pattern**: cpal `Stream` is not `Send`/`Sync` - use dedicated audio thread with message passing instead of storing in Tauri state
 - **Transcription**: Uses `whisper-rs` (whisper.cpp bindings), models stored in `~/Library/Application Support/echo-note/models/`
 - **LLM**: Ollama runs locally on port 11434, falls back to API if configured
 - **Database**: SQLite at app data directory, use SQLx for compile-time checked queries

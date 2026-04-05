@@ -34,11 +34,11 @@ A privacy-first native desktop app that listens to your meetings, transcribes lo
 
 ```bash
 # Clone the repo
-git clone <repo-url> echo-note
+gh repo clone jellydn/echo-note echo-note
 cd echo-note
 
 # Install frontend dependencies
-npm install
+bun install
 
 # Run in development mode
 cargo tauri dev
