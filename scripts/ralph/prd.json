@@ -71,8 +71,8 @@
 				"Typecheck passes"
 			],
 			"priority": 5,
-			"passes": false,
-			"notes": "BUG: stop_recording() in audio/mod.rs calls .take() on mic_handle and system_handle twice — first to send stop command (lines 161,166), then again to join threads (lines 175,183). Second .take() always returns None so thread results are never collected and audio data is lost. Fix: send stop command without taking, then take+join in the second block."
+			"passes": true,
+			"notes": "Reviewed 2026-04-06: previous stop_recording handle-consumption bug is already fixed. stop_recording() now sends Stop via borrowed handles at src-tauri/src/audio/mod.rs:161-166 and only consumes them once to join at lines 174-183."
 		},
 		{
 			"id": "US-006",
@@ -84,8 +84,8 @@
 				"Typecheck passes"
 			],
 			"priority": 6,
-			"passes": true,
-			"notes": "Implemented as part of US-005 - list_audio_devices_command was added"
+			"passes": false,
+			"notes": "GAP vs PRD US-003: the selector persists synthetic ids like device_0 from src-tauri/src/audio/mod.rs:486-489, but recording resolves devices by matching the stored value against the actual CoreAudio device name in src-tauri/src/audio/mod.rs:334-370. Any non-default selection falls back to host.default_input_device(), so the chosen microphone is not actually used."
 		},
 		{
 			"id": "US-007",
@@ -99,8 +99,8 @@
 				"Typecheck passes"
 			],
 			"priority": 7,
-			"passes": true,
-			"notes": "Implementation: Dual-device recording with automatic BlackHole detection and audio mixing. BlackHole driver must be installed separately by user."
+			"passes": false,
+			"notes": "PRD gap: system audio capture only detects an existing BlackHole install. There is no exposed install flow or first-launch setup despite install_blackhole_driver() existing only as dead code in src-tauri/src/system_audio/mod.rs:75-104, and no UI guides Screen Recording / audio permissions. When BlackHole is missing, the app only logs a backend warning in src-tauri/src/lib.rs:591-596 instead of showing the clear fallback warning required by the PRD."
 		},
 		{
 			"id": "US-008",
@@ -160,8 +160,8 @@
 				"Typecheck passes"
 			],
 			"priority": 11,
-			"passes": true,
-			"notes": ""
+			"passes": false,
+			"notes": "API fallback is not reliable with the shipped defaults. generate_summary_command forwards api_endpoint verbatim from settings in src-tauri/src/lib.rs:849-866, while generate_summary_api posts directly to that value in src-tauri/src/llm/mod.rs:109-114. The default and UI placeholder use https://api.openai.com/v1, which is a base URL, not the /chat/completions endpoint required for OpenAI-compatible chat requests."
 		},
 		{
 			"id": "US-012",
@@ -194,8 +194,8 @@
 				"Verify in browser using dev-browser skill"
 			],
 			"priority": 13,
-			"passes": true,
-			"notes": "Implemented processing view with: real-time transcription progress via Tauri events, progress bar with percentage, Generate Summary button after transcription, loading spinner during summary generation, auto-navigation to meeting detail on completion"
+			"passes": false,
+			"notes": "Behavioral regression: after summary completion or Skip Summary, RecordView invokes onMeetingCreated(meetingId) in src/components/RecordView.tsx:167-188, but App.tsx ignores the meetingId and routes to History at src/App.tsx:18-23. The PRD requires navigation to the meeting detail view on completion."
 		},
 		{
 			"id": "US-014",
@@ -228,7 +228,7 @@
 			],
 			"priority": 15,
 			"passes": false,
-			"notes": "BUG: Title editing in MeetingDetailView only updates local React state (line 154) — no update_meeting Tauri command exists in the backend, so title changes don't persist to SQLite. Fix: add update_meeting function to db/mod.rs, expose update_meeting_command in lib.rs, and call it from handleTitleSave in MeetingDetailView.tsx."
+			"notes": "BUG: title editing in MeetingDetailView only updates local React state at src/components/MeetingDetailView.tsx:142-155. No update_meeting storage function or Tauri command exists, so renamed meetings revert on refresh and are never persisted to SQLite."
 		},
 		{
 			"id": "US-016",

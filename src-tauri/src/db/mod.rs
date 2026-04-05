@@ -214,6 +214,23 @@ pub async fn list_meetings(pool: &Pool<Sqlite>) -> Result<Vec<Meeting>> {
     Ok(meetings)
 }
 
+/// Update a meeting's title
+pub async fn update_meeting(pool: &Pool<Sqlite>, id: i64, title: String) -> Result<bool> {
+    let result = sqlx::query(
+        r#"
+        UPDATE meetings
+        SET title = ?1
+        WHERE id = ?2
+        "#,
+    )
+    .bind(&title)
+    .bind(id)
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected() > 0)
+}
+
 /// Delete a meeting by ID
 pub async fn delete_meeting(pool: &Pool<Sqlite>, id: i64) -> Result<bool> {
     let result = sqlx::query("DELETE FROM meetings WHERE id = ?1")

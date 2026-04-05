@@ -147,12 +147,17 @@ export function MeetingDetailView({ meetingId, onBack }: MeetingDetailViewProps)
 
 		setIsSavingTitle(true);
 		try {
-			// Note: We need to update the meeting title
-			// For now, we'll update via the database using update_transcript as a placeholder
-			// In a real implementation, we'd have an update_meeting_command
-			// Since there's no update_meeting_command in the backend yet, we'll just update local state
-			setMeeting({ ...meeting, title: editedTitle.trim() });
-			setIsEditingTitle(false);
+			const response = await invoke<ApiResponse<Meeting>>("update_meeting_command", {
+				id: meetingId,
+				title: editedTitle.trim(),
+			});
+
+			if (response.success && response.data) {
+				setMeeting(response.data);
+				setIsEditingTitle(false);
+			} else {
+				setError(response.error || "Failed to update title");
+			}
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Failed to update title");
 		} finally {

@@ -480,7 +480,31 @@ Started: Mon Apr  6 06:32:26 +08 2026
   - **Future US-016**: Will add Settings view with audio device selector and model download UI
 ---
 
-## [Mon Apr 7 2026 16:30:00 +08] - US-016
+## [Mon Apr 7 2026 16:45:00 +08] - US-005 (Bug Fix)
+- What was implemented:
+  - Fixed critical bug in `stop_recording()` in `src-tauri/src/audio/mod.rs`
+  - Bug: `.take()` was called on `mic_handle` and `system_handle` twice - first to send stop commands, then again to join threads
+  - Second `.take()` always returned `None`, so thread results were never collected and audio data was lost
+  - Fix: Changed first block to use `if let Some(ref handle)` instead of `if let Some(handle)` to borrow instead of consume
+  - Now handles are only taken (consumed) when joining threads, ensuring thread results are properly collected
+  - Tested with all quality checks passing
+- Files changed:
+  - `src-tauri/src/audio/mod.rs` - Fixed stop_recording to not consume handles when sending stop commands
+- Quality checks passed:
+  - TypeScript typecheck: `tsc --noEmit` ✓
+  - Rust typecheck: `cargo check` ✓
+  - Rust lint: `cargo clippy` ✓
+  - Rust format: `cargo fmt --check` ✓
+  - Biome lint: `bun run lint` ✓
+  - Pre-commit hooks: all passed ✓
+- **Learnings for future iterations:**
+  - **Option::take() consumes the value**: Once you `.take()` from an `Option`, it becomes `None`
+  - **Borrow vs Consume pattern**: Use `ref` keyword in pattern matching to borrow the value without consuming it: `if let Some(ref handle)` vs `if let Some(handle)`
+  - **Thread handle management**: When managing thread handles, carefully track when handles are actually consumed vs just accessed
+  - **Message passing cleanup**: Send commands using borrowed references, only consume handles when you need to move them (e.g., for `.join()`)
+  - **Audio recording pattern**: The dual-thread audio recording needs careful handle management to ensure both threads complete and their data is collected
+---
+
 - What was implemented:
   - Created `SettingsView.tsx` component with full settings UI functionality
   - Audio device selection dropdown populated from `list_audio_devices_command`

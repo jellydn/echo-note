@@ -9,10 +9,10 @@ use db::{
     create_meeting, create_summary, create_transcript, delete_meeting, delete_setting,
     delete_summary, delete_transcript, get_meeting, get_setting, get_summary,
     get_summary_by_meeting, get_transcript, get_transcript_by_meeting, init_default_settings,
-    list_meetings, list_settings, list_summaries, list_transcripts, set_setting, update_summary,
-    update_transcript, CreateMeetingInput, CreateSummaryInput, CreateTranscriptInput,
-    DEFAULT_API_ENDPOINT, DEFAULT_API_KEY, DEFAULT_AUDIO_DEVICE, DEFAULT_LLM_PROVIDER,
-    DEFAULT_WHISPER_MODEL_SIZE,
+    list_meetings, list_settings, list_summaries, list_transcripts, set_setting, update_meeting,
+    update_summary, update_transcript, CreateMeetingInput, CreateSummaryInput,
+    CreateTranscriptInput, DEFAULT_API_ENDPOINT, DEFAULT_API_KEY, DEFAULT_AUDIO_DEVICE,
+    DEFAULT_LLM_PROVIDER, DEFAULT_WHISPER_MODEL_SIZE,
 };
 use llm::{
     check_ollama_status, generate_summary, generate_summary_api, DEFAULT_OLLAMA_URL,
@@ -161,6 +161,32 @@ async fn delete_meeting_command(
 
     if deleted {
         Ok(ApiResponse::success(true))
+    } else {
+        Ok(ApiResponse::error(format!(
+            "Meeting with id {} not found",
+            id
+        )))
+    }
+}
+
+#[tauri::command]
+async fn update_meeting_command(
+    state: State<'_, AppStateExt>,
+    id: i64,
+    title: String,
+) -> Result<ApiResponse<MeetingResponse>, String> {
+    let updated = update_meeting(&state.db, id, title)
+        .await
+        .map_err(|e| format!("Failed to update meeting: {}", e))?;
+
+    if updated {
+        // Fetch the updated meeting to return full data
+        let meeting = get_meeting(&state.db, id)
+            .await
+            .map_err(|e| format!("Failed to fetch updated meeting: {}", e))?
+            .ok_or_else(|| "Updated meeting not found".to_string())?;
+
+        Ok(ApiResponse::success(meeting.into()))
     } else {
         Ok(ApiResponse::error(format!(
             "Meeting with id {} not found",
@@ -926,6 +952,7 @@ pub fn run() {
             get_meeting_command,
             list_meetings_command,
             delete_meeting_command,
+            update_meeting_command,
             create_transcript_command,
             get_transcript_command,
             get_transcript_by_meeting_command,
