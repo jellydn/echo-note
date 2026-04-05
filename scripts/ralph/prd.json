@@ -160,8 +160,8 @@
 				"Typecheck passes"
 			],
 			"priority": 11,
-			"passes": false,
-			"notes": "API fallback is not reliable with the shipped defaults. generate_summary_command forwards api_endpoint verbatim from settings in src-tauri/src/lib.rs:849-866, while generate_summary_api posts directly to that value in src-tauri/src/llm/mod.rs:109-114. The default and UI placeholder use https://api.openai.com/v1, which is a base URL, not the /chat/completions endpoint required for OpenAI-compatible chat requests."
+			"passes": true,
+			"notes": "Fixed: generate_summary_command now constructs the full API URL by appending /chat/completions to the base URL from settings. Handles multiple URL formats: already-complete URLs (ends with /chat/completions), base URLs ending with /v1 (appends /chat/completions), and URLs with or without trailing slashes."
 		},
 		{
 			"id": "US-012",

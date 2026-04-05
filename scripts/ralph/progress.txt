@@ -1,6 +1,29 @@
 ---
 
-## [Sat Apr 5 2025 07:45:00 UTC] - US-013
+## [Sun Apr 6 2025 08:00:00 UTC] - US-011
+- What was implemented:
+  - Fixed the API fallback endpoint URL construction bug
+  - Modified `generate_summary_command` in `src-tauri/src/lib.rs` to construct the full API URL
+  - Added logic to append `/chat/completions` to base URLs from settings
+  - Handles multiple URL formats correctly:
+    - Already-complete URLs (ends with `/chat/completions`) - used as-is
+    - Base URLs ending with `/v1` - appends `/chat/completions`
+    - URLs with trailing slash - appends `chat/completions`
+    - URLs without trailing slash - appends `/chat/completions`
+  - This fixes the issue where the default `https://api.openai.com/v1` was being used directly instead of `https://api.openai.com/v1/chat/completions`
+- Files changed:
+  - `src-tauri/src/lib.rs` - Updated `generate_summary_command` to construct full API URL (lines 849-866)
+- Quality checks passed:
+  - TypeScript typecheck: `tsc --noEmit` ✓
+  - Biome lint: `bun run lint` ✓
+  - Rust typecheck: `cargo check` (in src-tauri) ✓
+  - Rust lint: `cargo clippy` (in src-tauri) ✓
+- **Learnings for future iterations:**
+  - **API URL construction**: When using OpenAI-compatible APIs, always ensure the full endpoint path (`/chat/completions`) is included
+  - **URL normalization**: Handle multiple user input formats gracefully - users may enter base URLs, full URLs, or URLs with/without trailing slashes
+  - **Default values**: The default endpoint `https://api.openai.com/v1` is a base URL, not a complete API endpoint - application code must handle the transformation
+  - **Configuration vs Runtime**: Settings storage should keep the base URL (more flexible), but runtime must construct the complete endpoint URL
+  - **Pattern**: Check if URL already has the required path before appending to support both base URLs and full URLs
 - What was implemented:
   - Fixed the post-recording navigation regression
   - Updated `App.tsx` `onMeetingCreated` callback to navigate to `meeting-detail` view instead of `history`
