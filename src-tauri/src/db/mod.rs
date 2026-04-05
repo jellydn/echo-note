@@ -1,7 +1,11 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{sqlite::SqlitePoolOptions, Pool, Sqlite};
+use sqlx::{
+    sqlite::{SqliteConnectOptions, SqlitePoolOptions},
+    Pool, Sqlite,
+};
+use std::str::FromStr;
 use tauri::Manager;
 
 /// Meeting record from the database
@@ -82,17 +86,20 @@ pub async fn init_db(app_handle: &tauri::AppHandle) -> Result<Pool<Sqlite>> {
     let app_dir = app_handle
         .path()
         .app_data_dir()
-        .expect("Failed to get app data directory");
+        .context("Failed to get app data directory")?;
 
     // Ensure the app data directory exists
-    std::fs::create_dir_all(&app_dir)?;
+    std::fs::create_dir_all(&app_dir).context("Failed to create app data directory")?;
 
     let db_path = app_dir.join("echo_note.db");
-    let db_url = format!("sqlite://{}", db_path.to_str().unwrap());
+    let db_url = format!("sqlite://{}", db_path.to_string_lossy());
+    let connect_options = SqliteConnectOptions::from_str(&db_url)?
+        .create_if_missing(true)
+        .foreign_keys(true);
 
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
-        .connect(&db_url)
+        .connect_with(connect_options)
         .await?;
 
     // Run migrations

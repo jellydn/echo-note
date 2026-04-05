@@ -885,10 +885,23 @@ async fn generate_summary_command(
             return Err("API key is required when using API provider".to_string());
         }
 
+        // Construct full API URL - ensure it ends with /chat/completions
+        // This handles both base URLs (e.g., https://api.openai.com/v1)
+        // and already-complete URLs
+        let api_url = if api_endpoint.ends_with("/chat/completions") {
+            api_endpoint
+        } else if api_endpoint.ends_with("/v1") {
+            format!("{}/chat/completions", api_endpoint)
+        } else if api_endpoint.ends_with('/') {
+            format!("{}chat/completions", api_endpoint)
+        } else {
+            format!("{}/chat/completions", api_endpoint)
+        };
+
         // Use a default model for API - this could be configurable in the future
         let model = "gpt-4o-mini";
 
-        generate_summary_api(&api_endpoint, &api_key, model, &transcript)
+        generate_summary_api(&api_url, &api_key, model, &transcript)
             .await
             .map_err(|e| format!("Failed to generate summary via API: {}", e))?
     } else {
