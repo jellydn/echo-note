@@ -472,6 +472,7 @@ where
 }
 
 /// List available audio input devices
+/// Returns vector of (id, name) tuples where id is the device name (for stable identification)
 pub fn list_audio_devices() -> Result<Vec<(String, String)>> {
     let host = cpal::default_host();
     let devices = host
@@ -480,13 +481,14 @@ pub fn list_audio_devices() -> Result<Vec<(String, String)>> {
 
     let mut device_list = Vec::new();
 
-    // Add default device
+    // Add default device option
     device_list.push(("default".to_string(), "Default Microphone".to_string()));
 
-    for (idx, device) in devices.enumerate() {
+    for device in devices {
         if let Ok(name) = device.name() {
-            let id = format!("device_{}", idx);
-            device_list.push((id, name));
+            // Use the actual device name as the ID for stable identification
+            // This ensures the stored device setting matches what cpal returns
+            device_list.push((name.clone(), name));
         }
     }
 

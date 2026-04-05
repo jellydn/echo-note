@@ -84,8 +84,8 @@
 				"Typecheck passes"
 			],
 			"priority": 6,
-			"passes": false,
-			"notes": "GAP vs PRD US-003: the selector persists synthetic ids like device_0 from src-tauri/src/audio/mod.rs:486-489, but recording resolves devices by matching the stored value against the actual CoreAudio device name in src-tauri/src/audio/mod.rs:334-370. Any non-default selection falls back to host.default_input_device(), so the chosen microphone is not actually used."
+			"passes": true,
+			"notes": "Fixed: list_audio_devices now returns actual CoreAudio device names as IDs instead of synthetic device_0, device_1, etc. This ensures the stored audio_device setting correctly matches the device selected by the user during recording."
 		},
 		{
 			"id": "US-007",
