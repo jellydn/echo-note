@@ -218,3 +218,39 @@ Started: Mon Apr  6 06:32:26 +08 2026
   - **Model sizes**: tiny (~39MB), base (~74MB), small (~244MB), medium (~769MB)
   - **Constants for future use**: Use `#[allow(dead_code)]` for constants that will be used in upcoming stories
 ---
+
+## [Mon Apr 6 2026 08:30:00 +08] - US-009
+- What was implemented:
+  - Added `whisper-rs` dependency for local audio transcription
+  - Created `TranscriptionProgress` struct for progress events with percentage and status
+  - Created `TranscriptionResult` struct with transcript text and duration
+  - Implemented `transcribe_audio()` function in whisper module:
+    - Loads Whisper model using `WhisperContext` and creates `WhisperState`
+    - Reads WAV audio file and converts to mono f32 at 16kHz sample rate
+    - Supports resampling from different sample rates using linear interpolation
+    - Processes long audio files in 30-second chunks
+    - Emits progress events at each stage: loading model, reading audio, transcribing chunks
+  - Added `transcribe_audio_command` Tauri command:
+    - Gets model size from settings (whisper_model_size)
+    - Runs transcription in spawn_blocking to avoid blocking the async runtime
+    - Saves completed transcript to database using create_transcript
+    - Returns transcript_id, text, and processing duration
+  - Registered `transcribe_audio_command` in the Tauri invoke handler
+- Files changed:
+  - `src-tauri/Cargo.toml` - Added `whisper-rs = "0.13"` dependency
+  - `src-tauri/src/whisper/mod.rs` - Added transcription functions and progress events
+  - `src-tauri/src/lib.rs` - Added transcribe_audio_command and registered it
+- Quality checks passed:
+  - TypeScript typecheck: `tsc --noEmit` ✓
+  - Rust typecheck: `cargo check` ✓
+  - Rust lint: `cargo clippy` ✓
+  - Rust format: `cargo fmt --check` ✓
+  - Pre-commit hooks: all passed ✓
+- **Learnings for future iterations:**
+  - **whisper-rs API pattern**: Use `WhisperContext::create_state()` to get `WhisperState`, then use `state.full()` for transcription
+  - **Audio preprocessing**: Convert stereo to mono by averaging channels, resample to 16kHz using linear interpolation
+  - **Chunk processing**: Process audio in 30-second chunks (30 * 16000 samples) for long files
+  - **Thread blocking**: Use `tokio::task::spawn_blocking` for CPU-intensive transcription to avoid blocking async runtime
+  - **Progress events**: Use `app_handle.emit()` to send progress updates during long-running operations
+  - **Settings integration**: Fetch model size from settings table via `get_setting` with DEFAULT_WHISPER_MODEL_SIZE fallback
+---
