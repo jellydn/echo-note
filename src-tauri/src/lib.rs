@@ -14,7 +14,10 @@ use db::{
     DEFAULT_API_ENDPOINT, DEFAULT_API_KEY, DEFAULT_AUDIO_DEVICE, DEFAULT_LLM_PROVIDER,
     DEFAULT_WHISPER_MODEL_SIZE,
 };
-use llm::{check_ollama_status, generate_summary, DEFAULT_OLLAMA_URL, DEFAULT_SUMMARY_MODEL};
+use llm::{
+    check_ollama_status, generate_summary, generate_summary_api, DEFAULT_OLLAMA_URL,
+    DEFAULT_SUMMARY_MODEL, PROVIDER_API,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use system_audio::{get_blackhole_device_name, is_blackhole_installed};
@@ -843,24 +846,34 @@ async fn generate_summary_command(
         .await
         .map_err(|e| format!("Failed to get LLM provider setting: {}", e))?;
 
-    // Currently only Ollama is supported (US-011 will add API fallback)
-    if llm_provider != "ollama" {
-        return Err(format!(
-            "LLM provider '{}' not yet implemented. Use 'ollama'.",
-            llm_provider
-        ));
-    }
+    let result = if llm_provider == PROVIDER_API {
+        // Use external API provider
+        let api_key = get_setting(&state.db, "api_key", "")
+            .await
+            .map_err(|e| format!("Failed to get API key setting: {}", e))?;
+        let api_endpoint = get_setting(&state.db, "api_endpoint", DEFAULT_API_ENDPOINT)
+            .await
+            .map_err(|e| format!("Failed to get API endpoint setting: {}", e))?;
 
-    // Get Ollama URL from settings or use default
-    let ollama_url = DEFAULT_OLLAMA_URL.to_string();
+        if api_key.is_empty() {
+            return Err("API key is required when using API provider".to_string());
+        }
 
-    // For now, use default model. US-016 will allow configuring this via settings
-    let model = DEFAULT_SUMMARY_MODEL;
+        // Use a default model for API - this could be configurable in the future
+        let model = "gpt-4o-mini";
 
-    // Generate summary
-    let result = generate_summary(&ollama_url, model, &transcript)
-        .await
-        .map_err(|e| format!("Failed to generate summary: {}", e))?;
+        generate_summary_api(&api_endpoint, &api_key, model, &transcript)
+            .await
+            .map_err(|e| format!("Failed to generate summary via API: {}", e))?
+    } else {
+        // Default to Ollama provider
+        let ollama_url = DEFAULT_OLLAMA_URL.to_string();
+        let model = DEFAULT_SUMMARY_MODEL;
+
+        generate_summary(&ollama_url, model, &transcript)
+            .await
+            .map_err(|e| format!("Failed to generate summary: {}", e))?
+    };
 
     // Save summary to database
     let summary_input = CreateSummaryInput {

@@ -19,7 +19,7 @@ Arguments:
   max_iterations    Number of iterations to run (default: 10)
   cli_tool         CLI tool to use: amp (default), opencode, or pi
   model            Model ID for opencode, mode for amp (smart/rush), or pi model pattern
-  share            Share session: true/false (default: false) - for opencode/pi
+  share            Share session: true/false (default: false) - only for opencode
 
 Options:
   -h, --help       Show this help message and exit
@@ -34,11 +34,11 @@ Examples:
   # Run with specific model
   ./ralph.sh 10 opencode opencode/big-pickle true
 
-  # Run with pi (uses --model and --thinking flags)
-  ./ralph.sh 10 pi google/gemini-2.0-flash true
+  # Run with pi (uses --model flag)
+  ./ralph.sh 10 pi google/gemini-2.0-flash
 
   # Run pi with thinking level
-  ./ralph.sh 10 pi claude-sonnet:high true
+  ./ralph.sh 10 pi claude-sonnet:high
 
 Files:
   prompt-amp.md       - System prompt for amp CLI
@@ -129,7 +129,7 @@ if [ -n "$MODEL" ]; then
 else
 	echo "Using CLI: $CLI_TOOL (default model)"
 fi
-if [ "$CLI_TOOL" = "opencode" ] || [ "$CLI_TOOL" = "pi" ]; then
+if [ "$CLI_TOOL" = "opencode" ]; then
 	echo "Share session: $SHARE"
 fi
 
@@ -150,17 +150,9 @@ for i in $(seq 1 $MAX_ITERATIONS); do
 	elif [ "$CLI_TOOL" = "pi" ]; then
 		# pi uses --model pattern and supports thinking levels via :suffix
 		if [ -n "$MODEL" ]; then
-			if [ "$SHARE" = "true" ]; then
-				OUTPUT=$(cat "$PROMPT_FILE" | pi --model "$MODEL" --share -p 2>&1 | tee /dev/stderr) || true
-			else
-				OUTPUT=$(cat "$PROMPT_FILE" | pi --model "$MODEL" -p 2>&1 | tee /dev/stderr) || true
-			fi
+			OUTPUT=$(cat "$PROMPT_FILE" | pi --model "$MODEL" -p 2>&1 | tee /dev/stderr) || true
 		else
-			if [ "$SHARE" = "true" ]; then
-				OUTPUT=$(cat "$PROMPT_FILE" | pi --share -p 2>&1 | tee /dev/stderr) || true
-			else
-				OUTPUT=$(cat "$PROMPT_FILE" | pi -p 2>&1 | tee /dev/stderr) || true
-			fi
+			OUTPUT=$(cat "$PROMPT_FILE" | pi -p 2>&1 | tee /dev/stderr) || true
 		fi
 	else
 		if [ -n "$MODEL" ]; then

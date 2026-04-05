@@ -40,7 +40,115 @@ struct OllamaGenerateResponse {
     done: bool,
 }
 
-/// Generate a structured summary from a transcript using Ollama
+/// LLM Provider types
+#[allow(dead_code)]
+pub const PROVIDER_OLLAMA: &str = "ollama";
+pub const PROVIDER_API: &str = "api";
+
+/// OpenAI-compatible chat completions request
+#[derive(Serialize)]
+struct ChatCompletionRequest {
+    model: String,
+    messages: Vec<ChatMessage>,
+    temperature: f32,
+}
+
+/// Chat message for API requests
+#[derive(Serialize)]
+struct ChatMessage {
+    role: String,
+    content: String,
+}
+
+/// OpenAI-compatible chat completions response
+#[derive(Deserialize)]
+struct ChatCompletionResponse {
+    choices: Vec<Choice>,
+}
+
+/// Choice in chat completion response
+#[derive(Deserialize)]
+struct Choice {
+    message: ResponseMessage,
+}
+
+/// Response message from API
+#[derive(Deserialize)]
+struct ResponseMessage {
+    content: String,
+}
+
+/// Generate a summary using OpenAI-compatible API
+pub async fn generate_summary_api(
+    api_endpoint: &str,
+    api_key: &str,
+    model: &str,
+    transcript: &str,
+) -> Result<SummaryResult> {
+    let start_time = Instant::now();
+
+    log::info!(
+        "Generating summary using API at {} with model {}",
+        api_endpoint,
+        model
+    );
+
+    let prompt = build_summary_prompt(transcript);
+
+    let request = ChatCompletionRequest {
+        model: model.to_string(),
+        messages: vec![ChatMessage {
+            role: "user".to_string(),
+            content: prompt,
+        }],
+        temperature: 0.7,
+    };
+
+    let client = reqwest::Client::new();
+
+    let response = client
+        .post(api_endpoint)
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&request)
+        .send()
+        .await
+        .context("Failed to connect to API endpoint")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(anyhow::anyhow!("API error ({}): {}", status, error_text));
+    }
+
+    let api_response: ChatCompletionResponse = response
+        .json()
+        .await
+        .context("Failed to parse API response")?;
+
+    let content = api_response
+        .choices
+        .first()
+        .map(|c| c.message.content.clone())
+        .unwrap_or_default();
+
+    log::info!("Received response from API, parsing summary...");
+
+    let summary = parse_summary_response(&content);
+    let duration = start_time.elapsed().as_secs_f64();
+
+    log::info!("Summary generated via API in {:.2} seconds", duration);
+
+    Ok(SummaryResult {
+        key_points: summary.key_points,
+        decisions: summary.decisions,
+        action_items: summary.action_items,
+        duration_seconds: duration,
+    })
+}
 pub async fn generate_summary(
     ollama_url: &str,
     model: &str,
