@@ -158,12 +158,11 @@ impl AudioRecorder {
         }
 
         // Send stop commands to all recording threads
-        if let Some(handle) = self.mic_handle.take() {
+        if let Some(ref handle) = self.mic_handle {
             let _ = handle.command_sender.send(RecordingCommand::Stop);
-            // Wait for thread to complete (will be joined below)
         }
 
-        if let Some(handle) = self.system_handle.take() {
+        if let Some(ref handle) = self.system_handle {
             let _ = handle.command_sender.send(RecordingCommand::Stop);
         }
 
