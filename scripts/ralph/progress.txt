@@ -18,30 +18,48 @@ Started: Mon Apr  6 06:32:26 +08 2026
 - **Settings pattern**: UPSERT via `ON CONFLICT(key) DO UPDATE`, defaults via `INSERT OR IGNORE`
 - **Foreign keys**: Use `ON DELETE CASCADE` for auto-cleanup of related records
 - **Audio thread pattern**: cpal Stream is not Send/Sync - use dedicated audio thread with message passing
+- **Dual-device recording**: Spawn separate threads for microphone and BlackHole, mix audio streams with sample rate normalization
+- **BlackHole detection**: Use system_profiler SPAudioDataType to detect BlackHole virtual audio device
+- **Audio mixing**: Mix multiple streams with attenuation (0.75 factor) to prevent clipping
+- **Resampling**: Linear interpolation for matching different sample rates between devices
 
-## [Mon Apr 6 2026 15:45:00 +08] - US-002
+---
+
+## [Mon Apr 7 2026 07:15:00 +08] - US-007
 - What was implemented:
-  - Added SQLx dependency with SQLite and chrono features to Cargo.toml
-  - Created `src/db/mod.rs` with database initialization and migrations
-  - Created `meetings` table with all required columns (id, title, date, duration_seconds, audio_path, created_at)
-  - Implemented Rust functions: create_meeting, get_meeting, list_meetings, delete_meeting
-  - Added Tauri commands exposed to frontend with consistent ApiResponse wrapper
-  - Database initializes on app startup and stores pool in AppState
+  - Created `system_audio` module for BlackHole virtual audio driver management
+  - Added `is_blackhole_installed()` to check if BlackHole driver is available
+  - Added `get_blackhole_device_name()` to retrieve the BlackHole device identifier
+  - Modified audio recorder to support dual-device recording (microphone + BlackHole)
+  - Created `start_recording` with optional system_device_name parameter for BlackHole
+  - Implemented audio mixing with `mix_audio_streams()` - combines mic and system audio
+  - Added sample rate resampling using linear interpolation for mismatched rates
+  - Added `RecordingResult.used_system_audio` flag to indicate if BlackHole was used
+  - Created `check_blackhole_status_command` Tauri command for frontend
+  - Updated `RecordingResponse` to include `used_system_audio` field
+  - Added fallback to mic-only recording with warning log when BlackHole not available
+  - Added `log` crate for structured logging
 - Files changed:
-  - `src-tauri/Cargo.toml` - Added sqlx, tokio, chrono, anyhow dependencies
-  - `src-tauri/src/db/mod.rs` - New database module (created)
-  - `src-tauri/src/lib.rs` - Integrated database, added Tauri commands
+  - `src-tauri/Cargo.toml` - Added `log` dependency
+  - `src-tauri/src/system_audio/mod.rs` - New module for BlackHole management (created)
+  - `src-tauri/src/audio/mod.rs` - Refactored for dual-device recording with mixing
+  - `src-tauri/src/lib.rs` - Added system_audio module, updated commands, added check_blackhole_status_command
+  - `src-tauri/resources/` - Created directory for BlackHole driver bundle (driver must be downloaded separately)
 - Quality checks passed:
   - TypeScript typecheck: `tsc --noEmit` ✓
   - Rust typecheck: `cargo check` ✓
   - Rust lint: `cargo clippy` ✓
   - Rust format: `cargo fmt --check` ✓
+  - Pre-commit hooks: all passed ✓
 - **Learnings for future iterations:**
-  - SQLx requires `chrono` feature enabled for DateTime<Utc> support with SQLite
-  - Use `tauri::Manager` trait to access `app.manage()` for state management
-  - RFC 3339 format is the standard for datetime serialization in JSON APIs
-  - The `setup()` hook in tauri::Builder is where database initialization should happen
-  - Use `tauri::async_runtime::block_on()` for async initialization in sync setup context
+  - **Dual-thread recording**: Each audio device needs its own thread since cpal Stream is not Send/Sync
+  - **Audio mixing strategy**: Use attenuation (multiply by 0.75) when mixing two audio sources to prevent clipping
+  - **Sample rate normalization**: Use linear interpolation to resample when devices have different sample rates
+  - **BlackHole detection**: Parse system_profiler SPAudioDataType JSON output to detect virtual audio devices
+  - **Graceful degradation**: Always fall back to mic-only if system audio capture fails
+  - **Message passing**: Use mpsc channels to communicate with audio threads (Stop command)
+  - **Thread joining**: Must join all recording threads before processing audio data
+  - **Mutex poisoning**: Handle potential mutex poisoning gracefully when threads panic
 ---
 
 ## [Mon Apr 6 06:45:00 +08 2026] - US-001
