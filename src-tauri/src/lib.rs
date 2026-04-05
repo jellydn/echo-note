@@ -1,10 +1,13 @@
 mod db;
 
 use db::{
-    create_meeting, create_summary, create_transcript, delete_meeting, delete_summary,
-    delete_transcript, get_meeting, get_summary, get_summary_by_meeting, get_transcript,
-    get_transcript_by_meeting, list_meetings, list_summaries, list_transcripts, update_summary,
+    create_meeting, create_summary, create_transcript, delete_meeting, delete_setting,
+    delete_summary, delete_transcript, get_meeting, get_setting, get_summary,
+    get_summary_by_meeting, get_transcript, get_transcript_by_meeting, init_default_settings,
+    list_meetings, list_settings, list_summaries, list_transcripts, set_setting, update_summary,
     update_transcript, AppState, CreateMeetingInput, CreateSummaryInput, CreateTranscriptInput,
+    DEFAULT_API_ENDPOINT, DEFAULT_API_KEY, DEFAULT_AUDIO_DEVICE, DEFAULT_LLM_PROVIDER,
+    DEFAULT_WHISPER_MODEL_SIZE,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
@@ -420,6 +423,112 @@ async fn delete_summary_command(
     }
 }
 
+// ==================== SETTINGS COMMANDS ====================
+
+/// Settings response for Tauri commands
+#[derive(Serialize, Clone)]
+struct SettingResponse {
+    id: i64,
+    key: String,
+    value: String,
+    created_at: String,
+    updated_at: String,
+}
+
+impl From<db::Setting> for SettingResponse {
+    fn from(setting: db::Setting) -> Self {
+        Self {
+            id: setting.id,
+            key: setting.key,
+            value: setting.value,
+            created_at: setting.created_at.to_rfc3339(),
+            updated_at: setting.updated_at.to_rfc3339(),
+        }
+    }
+}
+
+/// Input for getting a setting
+#[derive(Deserialize)]
+struct GetSettingRequest {
+    key: String,
+}
+
+/// Get a setting by key, returning default value if not found
+#[tauri::command]
+async fn get_setting_command(
+    state: State<'_, AppState>,
+    request: GetSettingRequest,
+) -> Result<ApiResponse<String>, String> {
+    // Determine default value based on key
+    let default_value = match request.key.as_str() {
+        "audio_device" => DEFAULT_AUDIO_DEVICE,
+        "whisper_model_size" => DEFAULT_WHISPER_MODEL_SIZE,
+        "llm_provider" => DEFAULT_LLM_PROVIDER,
+        "api_key" => DEFAULT_API_KEY,
+        "api_endpoint" => DEFAULT_API_ENDPOINT,
+        _ => "",
+    };
+
+    let value = get_setting(&state.db, &request.key, default_value)
+        .await
+        .map_err(|e| format!("Failed to get setting: {}", e))?;
+
+    Ok(ApiResponse::success(value))
+}
+
+/// Input for setting a value
+#[derive(Deserialize)]
+struct SetSettingRequest {
+    key: String,
+    value: String,
+}
+
+/// Set a setting value (insert or update)
+#[tauri::command]
+async fn set_setting_command(
+    state: State<'_, AppState>,
+    request: SetSettingRequest,
+) -> Result<ApiResponse<bool>, String> {
+    let success = set_setting(&state.db, &request.key, &request.value)
+        .await
+        .map_err(|e| format!("Failed to set setting: {}", e))?;
+
+    Ok(ApiResponse::success(success))
+}
+
+/// List all settings
+#[tauri::command]
+async fn list_settings_command(
+    state: State<'_, AppState>,
+) -> Result<ApiResponse<Vec<SettingResponse>>, String> {
+    let settings = list_settings(&state.db)
+        .await
+        .map_err(|e| format!("Failed to list settings: {}", e))?;
+
+    let responses: Vec<SettingResponse> = settings.into_iter().map(|s| s.into()).collect();
+    Ok(ApiResponse::success(responses))
+}
+
+/// Delete a setting by key
+#[tauri::command]
+async fn delete_setting_command(
+    state: State<'_, AppState>,
+    key: String,
+) -> Result<ApiResponse<bool>, String> {
+    let deleted = delete_setting(&state.db, &key)
+        .await
+        .map_err(|e| format!("Failed to delete setting: {}", e))?;
+
+    if deleted {
+        Ok(ApiResponse::success(true))
+    } else {
+        Ok(ApiResponse::error(format!(
+            "Setting with key '{}' not found",
+            key
+        )))
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -431,6 +540,11 @@ pub fn run() {
                 let db_pool = db::init_db(&app_handle)
                     .await
                     .expect("Failed to initialize database");
+
+                // Initialize default settings
+                init_default_settings(&db_pool)
+                    .await
+                    .expect("Failed to initialize default settings");
 
                 app_handle.manage(AppState { db: db_pool });
             });
@@ -453,7 +567,11 @@ pub fn run() {
             get_summary_by_meeting_command,
             list_summaries_command,
             update_summary_command,
-            delete_summary_command
+            delete_summary_command,
+            get_setting_command,
+            set_setting_command,
+            list_settings_command,
+            delete_setting_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -60,6 +60,23 @@ pub struct CreateSummaryInput {
     pub action_items: String,
 }
 
+/// Setting record from the database
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct Setting {
+    pub id: i64,
+    pub key: String,
+    pub value: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Default settings keys
+pub const DEFAULT_AUDIO_DEVICE: &str = "default";
+pub const DEFAULT_WHISPER_MODEL_SIZE: &str = "small";
+pub const DEFAULT_LLM_PROVIDER: &str = "ollama";
+pub const DEFAULT_API_KEY: &str = "";
+pub const DEFAULT_API_ENDPOINT: &str = "https://api.openai.com/v1";
+
 /// Application state containing the database pool
 pub struct AppState {
     pub db: Pool<Sqlite>,
@@ -130,6 +147,20 @@ async fn run_migrations(pool: &Pool<Sqlite>) -> Result<()> {
             action_items TEXT NOT NULL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key TEXT NOT NULL UNIQUE,
+            value TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         "#,
     )
@@ -396,4 +427,95 @@ pub async fn delete_summary(pool: &Pool<Sqlite>, id: i64) -> Result<bool> {
         .await?;
 
     Ok(result.rows_affected() > 0)
+}
+
+// ==================== SETTINGS CRUD ====================
+
+/// Get a setting by key, returning the default value if not found
+pub async fn get_setting(pool: &Pool<Sqlite>, key: &str, default_value: &str) -> Result<String> {
+    let setting: Option<(String,)> = sqlx::query_as(
+        r#"
+        SELECT value FROM settings WHERE key = ?1
+        "#,
+    )
+    .bind(key)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(setting
+        .map(|s| s.0)
+        .unwrap_or_else(|| default_value.to_string()))
+}
+
+/// Set a setting value (insert or update)
+pub async fn set_setting(pool: &Pool<Sqlite>, key: &str, value: &str) -> Result<bool> {
+    let result = sqlx::query(
+        r#"
+        INSERT INTO settings (key, value, updated_at)
+        VALUES (?1, ?2, ?3)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = excluded.updated_at
+        "#,
+    )
+    .bind(key)
+    .bind(value)
+    .bind(Utc::now())
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected() > 0)
+}
+
+/// Get all settings as a vector of Setting structs
+pub async fn list_settings(pool: &Pool<Sqlite>) -> Result<Vec<Setting>> {
+    let settings = sqlx::query_as::<_, Setting>(
+        r#"
+        SELECT id, key, value, created_at, updated_at
+        FROM settings
+        ORDER BY key ASC
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(settings)
+}
+
+/// Delete a setting by key
+pub async fn delete_setting(pool: &Pool<Sqlite>, key: &str) -> Result<bool> {
+    let result = sqlx::query("DELETE FROM settings WHERE key = ?1")
+        .bind(key)
+        .execute(pool)
+        .await?;
+
+    Ok(result.rows_affected() > 0)
+}
+
+/// Initialize default settings if they don't exist
+pub async fn init_default_settings(pool: &Pool<Sqlite>) -> Result<()> {
+    let defaults = [
+        ("audio_device", DEFAULT_AUDIO_DEVICE),
+        ("whisper_model_size", DEFAULT_WHISPER_MODEL_SIZE),
+        ("llm_provider", DEFAULT_LLM_PROVIDER),
+        ("api_key", DEFAULT_API_KEY),
+        ("api_endpoint", DEFAULT_API_ENDPOINT),
+    ];
+
+    for (key, default_value) in &defaults {
+        // Only insert if the key doesn't exist
+        sqlx::query(
+            r#"
+            INSERT OR IGNORE INTO settings (key, value, updated_at)
+            VALUES (?1, ?2, ?3)
+            "#,
+        )
+        .bind(key)
+        .bind(*default_value)
+        .bind(Utc::now())
+        .execute(pool)
+        .await?;
+    }
+
+    Ok(())
 }
