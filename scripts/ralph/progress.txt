@@ -437,3 +437,84 @@ Started: Mon Apr  6 06:32:26 +08 2026
   - **Future US-015**: Implement meeting detail view navigation from history click handler
   - **Duration formatting**: Reuse `formatDuration` helper across components (MM:SS pattern)
 ---
+
+## [Mon Apr 7 2026 15:30:00 +08] - US-015
+- What was implemented:
+  - Created `MeetingDetailView.tsx` component with full meeting detail UI functionality
+  - Implemented inline title editing with save/cancel buttons and keyboard shortcuts (Enter/Escape)
+  - Added meeting meta display with formatted date and duration
+  - Created two-column responsive grid layout for Summary and Transcript cards
+  - Implemented structured Summary card with sections: Key Points, Decisions, Action Items
+  - Added parsing logic for bullet points from summary text
+  - Created scrollable Transcript panel with proper text wrapping
+  - Implemented copy-to-clipboard buttons with visual feedback ("Copied" state for 2 seconds)
+  - Added loading state with spinner while fetching meeting data
+  - Added error state with back button for recovery
+  - Integrated with Tauri commands: `get_meeting_command`, `get_transcript_by_meeting_command`, `get_summary_by_meeting_command`
+  - Updated `App.tsx` to support navigation to meeting detail view with state management
+  - Added back button navigation from detail view to history
+  - Implemented dark mode support for all detail view styles
+  - Added comprehensive CSS styles for all detail view components
+- Files changed:
+  - `src/components/MeetingDetailView.tsx` - New meeting detail UI component (created)
+  - `src/App.tsx` - Updated to integrate MeetingDetailView with navigation state
+  - `src/App.css` - Added Meeting Detail view styles (grid, cards, edit mode, dark mode)
+- Quality checks passed:
+  - TypeScript typecheck: `tsc --noEmit` ✓
+  - Rust typecheck: `cargo check` ✓
+  - Rust lint: `cargo clippy` ✓
+  - Rust format: `cargo fmt --check` ✓
+  - Biome lint: `bun run lint` ✓
+  - Pre-commit hooks: all passed ✓
+- **Learnings for future iterations:**
+  - **Inline editing pattern**: Use separate state for edit mode (isEditingTitle), input value (editedTitle), and saving state (isSavingTitle)
+  - **Accessible editing**: Use keyboard shortcuts (Enter to save, Escape to cancel) for better UX
+  - **Clipboard API**: Use `navigator.clipboard.writeText()` for copy functionality with fallback
+  - **Copy feedback**: Use temporary state (copiedSection) with setTimeout to show visual feedback
+  - **Title edit trigger**: Use separate edit button next to title instead of making h1 interactive (better a11y)
+  - **Biome ignore pattern**: Use `// biome-ignore lint/RULE: Reason` for intentional exceptions
+  - **Summary parsing**: Parse bullet points by splitting on newlines and filtering for `-` or `*` prefixes
+  - **Two-column grid**: Use CSS Grid with responsive breakpoint at 900px for mobile stacking
+  - **Scrollable panels**: Use `overflow-y: auto` with `max-height` for scrollable content areas
+  - **Navigation state**: Store selectedMeetingId in parent component (App) for cross-view navigation
+  - **Future US-016**: Will add Settings view with audio device selector and model download UI
+---
+
+## [Mon Apr 7 2026 16:30:00 +08] - US-016
+- What was implemented:
+  - Created `SettingsView.tsx` component with full settings UI functionality
+  - Audio device selection dropdown populated from `list_audio_devices_command`
+  - Whisper model size selector (tiny/base/small/medium) with download buttons
+  - Model download status indicators (✓ Downloaded or Download button)
+  - Model download functionality via `download_whisper_model_command`
+  - LLM Provider toggle with Local (Ollama) and API options
+  - Ollama status indicator showing if server is running
+  - API configuration section with privacy warning "Data will leave your device"
+  - API key and endpoint input fields (shown only when API provider selected)
+  - Settings persistence via `get_setting_command` and `set_setting_command`
+  - Success/error feedback messages with auto-dismiss
+  - Loading states and spinner during settings fetch
+  - Dark mode support for all settings UI components
+  - Comprehensive CSS styles for settings sections, model options, provider options
+- Files changed:
+  - `src/components/SettingsView.tsx` - New settings UI component (created)
+  - `src/App.tsx` - Updated to use SettingsView component
+  - `src/App.css` - Added Settings view styles (sections, model options, provider options, dark mode)
+- Quality checks passed:
+  - TypeScript typecheck: `tsc --noEmit` ✓
+  - Rust typecheck: `cargo check` ✓
+  - Rust lint: `cargo clippy` ✓
+  - Rust format: `cargo fmt --check` ✓
+  - Biome lint: `bun run lint` ✓
+  - Pre-commit hooks: all passed ✓
+- **Learnings for future iterations:**
+  - **Settings fetch pattern**: Use multiple `invoke` calls in parallel to fetch all settings on mount
+  - **Radio group UI**: Use consistent radio button pattern with `name` attribute for grouping
+  - **Conditional rendering**: Show/hide API fields based on provider selection state
+  - **Biome a11y ignore**: Use `// biome-ignore lint/a11y/noLabelWithoutControl: Reason` for section header labels
+  - **Model download UX**: Show download button for missing models, checkmark for downloaded
+  - **Privacy warning**: Use prominent warning banner when user selects external API provider
+  - **Live status check**: Fetch Ollama status on mount to show real-time availability
+  - **Auto-save pattern**: Save settings immediately on change with success feedback
+  - **Future US-017**: Will enhance the model download UI with progress bar (download progress events)
+---

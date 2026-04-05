@@ -227,8 +227,8 @@
 				"Verify in browser using dev-browser skill"
 			],
 			"priority": 15,
-			"passes": false,
-			"notes": ""
+			"passes": true,
+			"notes": "Implemented MeetingDetailView component with: inline editable title with save/cancel buttons, meeting meta display (date, duration), two-column grid layout with Summary and Transcript cards, structured summary sections (Key Points, Decisions, Action Items), scrollable transcript panel, copy-to-clipboard buttons with feedback, loading and error states, back button navigation, dark mode support"
 		},
 		{
 			"id": "US-016",
@@ -246,8 +246,8 @@
 				"Verify in browser using dev-browser skill"
 			],
 			"priority": 16,
-			"passes": false,
-			"notes": ""
+			"passes": true,
+			"notes": "Implemented SettingsView component with: audio device dropdown, Whisper model selector with download buttons, LLM provider toggle (Local/API), API key/endpoint inputs with privacy warning, Ollama status indicator, settings persistence via Tauri commands, dark mode support, success/error feedback messages"
 		},
 		{
 			"id": "US-017",
