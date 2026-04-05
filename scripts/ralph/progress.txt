@@ -401,3 +401,39 @@ Started: Mon Apr  6 06:32:26 +08 2026
   - **Component structure**: Keep state logic in component, pass callbacks to parent for navigation
   - **Biome configuration**: Use `files.includes` with negative patterns to exclude `target/`, `node_modules/`, etc.
 ---
+
+## [Sun Apr 6 2026 22:45:00 +08] - US-014
+- What was implemented:
+  - Created `HistoryView.tsx` component with full meeting history UI functionality
+  - Lists meetings sorted by date (newest first) using `list_meetings_command`
+  - Each entry displays title, formatted date/time, and duration
+  - Click handler on meeting items for future navigation to detail view
+  - Delete button on each entry with confirmation modal dialog
+  - Empty state with icon and message when no meetings exist
+  - Loading state with spinner during data fetch
+  - Error handling with retry button for failed loads
+  - Added dark mode support for all History view styles
+  - Updated `App.tsx` to use HistoryView component instead of placeholder
+  - Added comprehensive CSS styles for history list, items, and states
+- Files changed:
+  - `src/components/HistoryView.tsx` - New history UI component (created)
+  - `src/App.tsx` - Updated to use HistoryView component
+  - `src/App.css` - Added History view styles (list, items, states, dark mode)
+- Quality checks passed:
+  - TypeScript typecheck: `tsc --noEmit` ✓
+  - Rust typecheck: `cargo check` ✓
+  - Rust lint: `cargo clippy` ✓
+  - Rust format: `cargo fmt --check` ✓
+  - Biome lint: `bun run lint` ✓
+  - Pre-commit hooks: all passed ✓
+- **Learnings for future iterations:**
+  - **Meeting list pattern**: Use `list_meetings_command` to fetch all meetings, sort client-side by date
+  - **Date formatting**: Use `toLocaleDateString` + `toLocaleTimeString` for readable dates
+  - **Delete confirmation**: Use modal overlay with separate confirm/cancel actions
+  - **Nested button issue**: Cannot nest buttons in HTML - use div with role="button" for clickable items containing other buttons
+  - **Biome ignore comments**: Use `// biome-ignore lint/RULE` for intentional a11y patterns
+  - **Empty state**: Always provide helpful empty state UI with icon and action prompt
+  - **Error retry**: Offer retry button for failed network/database operations
+  - **Future US-015**: Implement meeting detail view navigation from history click handler
+  - **Duration formatting**: Reuse `formatDuration` helper across components (MM:SS pattern)
+---
