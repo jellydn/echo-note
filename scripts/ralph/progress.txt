@@ -17,6 +17,7 @@ Started: Mon Apr  6 06:32:26 +08 2026
 - **API Response pattern**: Use generic `ApiResponse<T>` struct for consistent responses
 - **Settings pattern**: UPSERT via `ON CONFLICT(key) DO UPDATE`, defaults via `INSERT OR IGNORE`
 - **Foreign keys**: Use `ON DELETE CASCADE` for auto-cleanup of related records
+- **Audio thread pattern**: cpal Stream is not Send/Sync - use dedicated audio thread with message passing
 
 ## [Mon Apr 6 2026 15:45:00 +08] - US-002
 - What was implemented:
@@ -123,4 +124,39 @@ Started: Mon Apr  6 06:32:26 +08 2026
   - The `sqlx::query_as::<_, (String,)>` pattern works for fetching single values
   - When adding new tables, remember to add defaults initialization in setup hook
   - Settings CRUD follows same pattern as meetings/transcripts/summaries: get_setting with default fallback, set_setting with UPSERT, list_settings, delete_setting
+---
+
+## [Mon Apr 6 2026 21:15:00 +08] - US-005
+- What was implemented:
+  - Added `cpal` and `hound` dependencies to Cargo.toml for audio capture and WAV writing
+  - Created `src/audio/mod.rs` with AudioRecorder struct for managing recording state
+  - Implemented dedicated audio recording thread pattern (cpal Stream is not Send/Sync)
+  - Added RecordingCommand enum for message passing between threads
+  - Implemented start_recording function that spawns audio thread with cpal Stream
+  - Implemented stop_recording that sends stop command, joins thread, and saves WAV file
+  - Audio is saved to app data directory with timestamp in filename (recording_YYYYMMDD_HHMMSS.wav)
+  - Files are mono, 16-bit PCM, at the sample rate from the selected input device
+  - Exposed Tauri commands: start_recording_command, stop_recording_command, list_audio_devices_command
+  - Updated AppStateExt to hold AudioRecorder instead of raw cpal Stream
+  - Audio device selection uses settings from database (audio_device key)
+  - Removed unused AppState struct from db/mod.rs to fix dead code warning
+- Files changed:
+  - `src-tauri/Cargo.toml` - Added cpal, hound dependencies
+  - `src-tauri/src/audio/mod.rs` - New audio module with AudioRecorder (created)
+  - `src-tauri/src/lib.rs` - Added AppStateExt, recording commands, updated setup
+  - `src-tauri/src/db/mod.rs` - Removed unused AppState struct
+  - `AGENTS.md` - Added audio thread pattern documentation
+- Quality checks passed:
+  - TypeScript typecheck: `tsc --noEmit` ✓
+  - Rust typecheck: `cargo check` ✓
+  - Rust lint: `cargo clippy` ✓
+  - Rust format: `cargo fmt --check` ✓
+  - Pre-commit hooks: all passed ✓
+- **Learnings for future iterations:**
+  - **cpal Stream is not Send/Sync**: Cannot store in Tauri state directly. Use dedicated audio thread + message passing pattern instead.
+  - **Audio thread pattern**: Spawn thread in start_recording, use mpsc channel to send stop command, join thread in stop_recording.
+  - **WAV file format**: Use hound crate for writing, convert f32 samples to i16 for 16-bit PCM output.
+  - **Audio mixing**: Mix multi-channel input to mono by averaging samples across channels.
+  - **Device selection**: Get device_id from settings, fall back to cpal default_input_device().
+  - **File naming**: Use chrono UTC timestamp for unique, sortable recording filenames.
 ---
