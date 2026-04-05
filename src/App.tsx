@@ -3,6 +3,7 @@ import "./App.css";
 import { HistoryView } from "./components/HistoryView";
 import { MeetingDetailView } from "./components/MeetingDetailView";
 import { RecordView } from "./components/RecordView";
+import { SettingsView } from "./components/SettingsView";
 
 type View = "record" | "history" | "settings" | "meeting-detail";
 
@@ -54,12 +55,7 @@ function App() {
 					/>
 				);
 			case "settings":
-				return (
-					<div className="view-container">
-						<h2>Settings</h2>
-						<p>App settings will be configured here.</p>
-					</div>
-				);
+				return <SettingsView />;
 			default:
 				return null;
 		}
