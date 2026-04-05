@@ -35,7 +35,43 @@ Started: Mon Apr  6 06:32:26 +08 2026
 - **CSS animations**: Use `@keyframes` with `animation` property for pulsing/recording indicators
 - **Timer display**: Use `font-variant-numeric: tabular-nums` for consistent-width numbers in timers
 - **Biome lint config**: Use `files.includes` with negative patterns (e.g., `!**/target`) to exclude build artifacts
+- **Tauri event listening**: Use `listen<T>("event-name", callback)` from `@tauri-apps/api/event` for backend events
+- **Cleanup pattern**: Store unlisten function in ref, call it in useEffect cleanup to prevent memory leaks
+- **Processing UI pattern**: Use stage-based state machine (idle → transcribing → complete → generating → done)
+- **Progress bar**: CSS-based with percentage width and smooth transitions
 
+---
+
+## [Sun Apr 6 2026 22:30:00 +08] - US-013
+- What was implemented:
+  - Added post-recording processing UI to RecordView component
+  - Integrated Tauri event listener for `transcription-progress` events using `listen()` from `@tauri-apps/api/event`
+  - Created processing stage state machine: idle → transcribing → transcription_complete → generating_summary → complete
+  - Implemented transcription progress bar with real-time percentage updates from Rust backend
+  - Added "Generate Summary" button that appears after transcription completes
+  - Implemented summary generation loading spinner with AI status message
+  - Added "Skip Summary" button to bypass summary generation and go directly to meeting detail
+  - Auto-navigation to meeting detail view after summary generation completes
+  - Added comprehensive CSS styles for processing view with dark mode support
+  - Proper cleanup of event listener on component unmount to prevent memory leaks
+- Files changed:
+  - `src/components/RecordView.tsx` - Added processing UI flow and Tauri event listener
+  - `src/App.css` - Added processing view styles (spinner, progress bar, buttons, dark mode)
+- Quality checks passed:
+  - TypeScript typecheck: `tsc --noEmit` ✓
+  - Rust typecheck: `cargo check` ✓
+  - Rust lint: `cargo clippy` ✓
+  - Rust format: `cargo fmt --check` ✓
+  - Biome lint: `bun run lint` ✓
+  - Pre-commit hooks: all passed ✓
+- **Learnings for future iterations:**
+  - **Tauri event API**: Import `listen` from `@tauri-apps/api/event` (not from core)
+  - **Event cleanup**: Always store the unlisten function and call it in useEffect cleanup
+  - **Type-safe events**: Use `listen<EventType>("event-name", (event) => { event.payload })` for typed events
+  - **Stage-based UI**: Use a state machine pattern for multi-step processing flows
+  - **Progress events from Rust**: Backend uses `app.emit("event-name", payload)` for real-time updates
+  - **Auto-navigation**: Use `setTimeout` with small delay to let user see completion state before navigation
+  - **Skip option**: Always provide escape hatch for long-running operations
 ---
 
 ## [Mon Apr 7 2026 10:00:00 +08] - US-011

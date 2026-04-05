@@ -194,8 +194,8 @@
 				"Verify in browser using dev-browser skill"
 			],
 			"priority": 13,
-			"passes": false,
-			"notes": ""
+			"passes": true,
+			"notes": "Implemented processing view with: real-time transcription progress via Tauri events, progress bar with percentage, Generate Summary button after transcription, loading spinner during summary generation, auto-navigation to meeting detail on completion"
 		},
 		{
 			"id": "US-014",
@@ -211,8 +211,8 @@
 				"Verify in browser using dev-browser skill"
 			],
 			"priority": 14,
-			"passes": false,
-			"notes": ""
+			"passes": true,
+			"notes": "Implemented HistoryView component with: chronological list sorted by date (newest first), title/date/duration display per entry, click handler for navigation, delete button with confirmation modal, empty state, loading state, error handling with retry, dark mode support"
 		},
 		{
 			"id": "US-015",

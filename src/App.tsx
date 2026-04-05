@@ -1,8 +1,9 @@
 import { useState } from "react";
 import "./App.css";
+import { HistoryView } from "./components/HistoryView";
 import { RecordView } from "./components/RecordView";
 
-type View = "record" | "history" | "settings";
+type View = "record" | "history" | "settings" | "meeting-detail";
 
 function App() {
 	const [currentView, setCurrentView] = useState<View>("record");
@@ -21,10 +22,15 @@ function App() {
 				);
 			case "history":
 				return (
-					<div className="view-container">
-						<h2>History</h2>
-						<p>Meeting history will be displayed here.</p>
-					</div>
+					<HistoryView
+						onMeetingClick={(meetingId) => {
+							console.log("Meeting clicked:", meetingId);
+							// Future: Navigate to meeting detail view (US-015)
+						}}
+						onDeleteMeeting={(meetingId) => {
+							console.log("Meeting deleted:", meetingId);
+						}}
+					/>
 				);
 			case "settings":
 				return (

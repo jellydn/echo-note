@@ -649,6 +649,266 @@ body,
 	}
 }
 
+/* ==================== HISTORY VIEW STYLES ==================== */
+
+.history-view {
+	min-height: 100%;
+	padding: 32px;
+}
+
+.history-container {
+	max-width: 800px;
+	margin: 0 auto;
+}
+
+.history-header {
+	margin-bottom: 24px;
+}
+
+.history-header h2 {
+	font-size: 1.75rem;
+	font-weight: 600;
+	color: #1a1a2e;
+	margin-bottom: 4px;
+}
+
+.history-subtitle {
+	color: #666;
+	font-size: 0.95rem;
+}
+
+/* Loading State */
+.history-loading {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 16px;
+	min-height: 300px;
+	color: #666;
+}
+
+.history-spinner {
+	width: 40px;
+	height: 40px;
+	border: 3px solid rgba(26, 26, 46, 0.1);
+	border-top-color: #1a1a2e;
+	border-radius: 50%;
+	animation: spin 1s linear infinite;
+}
+
+/* Error State */
+.history-error {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 16px;
+	background-color: #fee;
+	border: 1px solid #fcc;
+	border-radius: 8px;
+	color: #c33;
+	margin-bottom: 16px;
+}
+
+.history-retry-button {
+	padding: 10px 20px;
+	border: none;
+	border-radius: 8px;
+	background-color: #1a1a2e;
+	color: white;
+	font-size: 0.9rem;
+	font-weight: 500;
+	cursor: pointer;
+	transition: background-color 0.2s ease;
+}
+
+.history-retry-button:hover {
+	background-color: #2a2a4e;
+}
+
+/* Empty State */
+.history-empty {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	min-height: 300px;
+	gap: 16px;
+	text-align: center;
+}
+
+.history-empty-icon {
+	font-size: 3rem;
+	opacity: 0.5;
+}
+
+.history-empty h3 {
+	font-size: 1.25rem;
+	font-weight: 600;
+	color: #1a1a2e;
+}
+
+.history-empty p {
+	color: #666;
+	font-size: 0.95rem;
+}
+
+/* History List */
+.history-list {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.history-item {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 16px 20px;
+	background-color: white;
+	border-radius: 12px;
+	border: 1px solid #e0e0e0;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.history-item:hover {
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+	transform: translateY(-1px);
+	border-color: #d0d0d0;
+}
+
+.history-item:focus {
+	outline: 2px solid #1a1a2e;
+	outline-offset: 2px;
+}
+
+.history-item-content {
+	display: flex;
+	flex: 1;
+	justify-content: space-between;
+	align-items: center;
+	gap: 16px;
+}
+
+.history-item-main {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	flex: 1;
+}
+
+.history-item-title {
+	font-size: 1.1rem;
+	font-weight: 600;
+	color: #1a1a2e;
+	margin: 0;
+}
+
+.history-item-date {
+	font-size: 0.875rem;
+	color: #666;
+	margin: 0;
+}
+
+.history-item-meta {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.history-item-duration {
+	font-size: 0.875rem;
+	color: #888;
+	font-weight: 500;
+	font-variant-numeric: tabular-nums;
+}
+
+.history-item-delete {
+	padding: 8px 12px;
+	border: none;
+	background: transparent;
+	border-radius: 8px;
+	cursor: pointer;
+	font-size: 1.1rem;
+	opacity: 0.6;
+	transition: all 0.2s ease;
+}
+
+.history-item-delete:hover {
+	opacity: 1;
+	background-color: #fee;
+}
+
+/* Delete Modal */
+.delete-modal h3 {
+	color: #c33;
+}
+
+.modal-button.danger {
+	background-color: #c33;
+	color: white;
+}
+
+.modal-button.danger:hover:not(:disabled) {
+	background-color: #a22;
+}
+
+/* Dark mode support for History View */
+@media (prefers-color-scheme: dark) {
+	.history-header h2 {
+		color: #f6f6f6;
+	}
+
+	.history-subtitle {
+		color: #aaa;
+	}
+
+	.history-spinner {
+		border-color: rgba(246, 246, 246, 0.1);
+		border-top-color: #f6f6f6;
+	}
+
+	.history-error {
+		background-color: rgba(255, 68, 68, 0.1);
+		border-color: rgba(255, 68, 68, 0.3);
+	}
+
+	.history-empty h3 {
+		color: #f6f6f6;
+	}
+
+	.history-empty p {
+		color: #aaa;
+	}
+
+	.history-item {
+		background-color: #3a3a4a;
+		border-color: #4a4a5a;
+	}
+
+	.history-item:hover {
+		border-color: #5a5a6a;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+	}
+
+	.history-item-title {
+		color: #f6f6f6;
+	}
+
+	.history-item-date {
+		color: #aaa;
+	}
+
+	.history-item-duration {
+		color: #888;
+	}
+
+	.history-item-delete:hover {
+		background-color: rgba(255, 68, 68, 0.2);
+	}
+}
+
 @media (prefers-color-scheme: dark) {
 	.recording-timer {
 		color: #f6f6f6;
