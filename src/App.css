@@ -314,6 +314,60 @@ body,
 	color: #888;
 }
 
+/* Mic Test */
+.mic-test {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin-top: 12px;
+	justify-content: center;
+	flex-wrap: wrap;
+}
+
+.mic-test-button {
+	padding: 8px 16px;
+	border: 1px solid #ddd;
+	border-radius: 6px;
+	background: #f8f8f8;
+	cursor: pointer;
+	font-size: 0.875rem;
+}
+
+.mic-test-button:hover:not(:disabled) {
+	background: #eee;
+}
+
+.mic-test-button:disabled {
+	opacity: 0.6;
+	cursor: wait;
+}
+
+.mic-test-result {
+	font-size: 0.875rem;
+}
+
+.mic-test-result.good {
+	color: #2a7;
+}
+
+.mic-test-result.silent {
+	color: #c63;
+}
+
+.mic-test-link {
+	background: none;
+	border: none;
+	color: #c63;
+	text-decoration: underline;
+	cursor: pointer;
+	font-size: inherit;
+	padding: 0;
+}
+
+.mic-test-link:hover {
+	color: #a52;
+}
+
 /* Error Display */
 .record-error {
 	display: flex;
@@ -1759,6 +1813,30 @@ body,
 	font-weight: 600;
 }
 
+/* Model Links */
+.model-links {
+	display: flex;
+	gap: 12px;
+	margin-top: 8px;
+	flex-wrap: wrap;
+}
+
+.model-link-button {
+	padding: 6px 12px;
+	border: 1px solid #ddd;
+	border-radius: 6px;
+	background: #f8f8f8;
+	cursor: pointer;
+	font-size: 0.8rem;
+	color: #555;
+	text-decoration: none;
+}
+
+.model-link-button:hover {
+	background: #eee;
+	color: #333;
+}
+
 /* Provider Options */
 .provider-options {
 	display: flex;
@@ -1847,6 +1925,143 @@ body,
 
 .warning-icon {
 	font-size: 1.1rem;
+}
+
+/* BlackHole System Audio */
+.blackhole-status {
+	margin-top: 8px;
+}
+
+.blackhole-installed {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 12px 16px;
+	background-color: #e8f5e9;
+	border: 1px solid #81c784;
+	border-radius: 8px;
+	color: #2e7d32;
+	font-size: 0.9rem;
+}
+
+.blackhole-installed .status-icon {
+	font-size: 1.2rem;
+}
+
+.blackhole-missing {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.blackhole-buttons {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	align-items: center;
+}
+
+.blackhole-warning {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 12px 16px;
+	background-color: #fff3e0;
+	border: 1px solid #ffcc80;
+	border-radius: 8px;
+	color: #e65100;
+	font-size: 0.9rem;
+}
+
+.blackhole-homebrew-button {
+	padding: 10px 20px;
+	background-color: #2e7d32;
+	color: white;
+	border: none;
+	border-radius: 6px;
+	font-size: 0.9rem;
+	font-weight: 500;
+	cursor: pointer;
+	transition: background-color 0.2s ease;
+}
+
+.blackhole-homebrew-button:hover:not(:disabled) {
+	background-color: #1b5e20;
+}
+
+.blackhole-homebrew-button:disabled {
+	background-color: #4a4a5a;
+	cursor: not-allowed;
+}
+
+.blackhole-install-button {
+	padding: 10px 20px;
+	background-color: #6a6a8a;
+	color: white;
+	border: none;
+	border-radius: 6px;
+	font-size: 0.9rem;
+	font-weight: 500;
+	cursor: pointer;
+	transition: background-color 0.2s ease;
+}
+
+.blackhole-install-button:hover:not(:disabled) {
+	background-color: #5a5a7a;
+}
+
+.blackhole-install-button:disabled {
+	background-color: #4a4a5a;
+	cursor: not-allowed;
+}
+
+.blackhole-check-button {
+	padding: 10px 20px;
+	background-color: transparent;
+	color: #6a6a8a;
+	border: 1px solid #6a6a8a;
+	border-radius: 6px;
+	font-size: 0.9rem;
+	font-weight: 500;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.blackhole-check-button:hover:not(:disabled) {
+	background-color: #6a6a8a;
+	color: white;
+}
+
+.blackhole-check-button:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+/* Dark mode support for BlackHole */
+@media (prefers-color-scheme: dark) {
+	.blackhole-installed {
+		background-color: #1b3a1c;
+		border-color: #4caf50;
+		color: #81c784;
+	}
+
+	.blackhole-warning {
+		background-color: #3f2e20;
+		border-color: #b45309;
+		color: #fbbf24;
+	}
+
+	.blackhole-install-button {
+		background-color: #5a5a7a;
+	}
+
+	.blackhole-install-button:hover:not(:disabled) {
+		background-color: #6a6a8a;
+	}
+
+	.blackhole-install-button:disabled {
+		background-color: #4a4a5a;
+	}
 }
 
 /* Dark mode support for Settings View */
@@ -1999,5 +2214,30 @@ body,
 		background-color: rgba(255, 152, 0, 0.1);
 		border-color: rgba(255, 152, 0, 0.3);
 		color: #ffb74d;
+	}
+
+	/* BlackHole dark mode */
+	.blackhole-installed {
+		background-color: #1b3a1c;
+		border-color: #4caf50;
+		color: #81c784;
+	}
+
+	.blackhole-warning {
+		background-color: #3f2e20;
+		border-color: #b45309;
+		color: #fbbf24;
+	}
+
+	.blackhole-install-button {
+		background-color: #5a5a7a;
+	}
+
+	.blackhole-install-button:hover:not(:disabled) {
+		background-color: #6a6a8a;
+	}
+
+	.blackhole-install-button:disabled {
+		background-color: #4a4a5a;
 	}
 }

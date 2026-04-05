@@ -20,7 +20,7 @@ use llm::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use system_audio::{get_blackhole_device_name, is_blackhole_installed};
+use system_audio::{get_blackhole_device_name, install_blackhole_driver, is_blackhole_installed};
 use tauri::{Manager, State};
 use whisper::{
     download_whisper_model, get_models_info, is_model_downloaded, transcribe_audio, ModelInfo,
@@ -125,16 +125,25 @@ async fn get_meeting_command(
     state: State<'_, AppStateExt>,
     id: i64,
 ) -> Result<ApiResponse<MeetingResponse>, String> {
-    let meeting = get_meeting(&state.db, id)
-        .await
-        .map_err(|e| format!("Failed to get meeting: {}", e))?;
+    log::info!("Getting meeting with id: {}", id);
+
+    let meeting = get_meeting(&state.db, id).await.map_err(|e| {
+        log::error!("Database error fetching meeting {}: {}", id, e);
+        format!("Database error: {}", e)
+    })?;
 
     match meeting {
-        Some(m) => Ok(ApiResponse::success(m.into())),
-        None => Ok(ApiResponse::error(format!(
-            "Meeting with id {} not found",
-            id
-        ))),
+        Some(m) => {
+            log::info!("Found meeting: {} ({})", m.id, m.title);
+            Ok(ApiResponse::success(m.into()))
+        }
+        None => {
+            log::warn!("Meeting with id {} not found", id);
+            Ok(ApiResponse::error(format!(
+                "Meeting with id {} not found",
+                id
+            )))
+        }
     }
 }
 
@@ -671,6 +680,23 @@ async fn list_audio_devices_command() -> Result<ApiResponse<Vec<AudioDeviceInfo>
     Ok(ApiResponse::success(device_infos))
 }
 
+/// Test microphone by capturing 1 second of audio and returning the peak level
+#[tauri::command]
+async fn test_microphone_command(
+    state: State<'_, AppStateExt>,
+) -> Result<ApiResponse<f32>, String> {
+    let device_id = get_setting(&state.db, "audio_device", DEFAULT_AUDIO_DEVICE)
+        .await
+        .map_err(|e| format!("Failed to get audio device setting: {}", e))?;
+
+    let peak = tokio::task::spawn_blocking(move || audio::test_microphone(&device_id))
+        .await
+        .map_err(|e| format!("Mic test task failed: {}", e))?
+        .map_err(|e| format!("Mic test failed: {}", e))?;
+
+    Ok(ApiResponse::success(peak))
+}
+
 // ==================== BLACKHOLE SYSTEM AUDIO COMMANDS ====================
 
 /// Response for BlackHole status
@@ -678,6 +704,37 @@ async fn list_audio_devices_command() -> Result<ApiResponse<Vec<AudioDeviceInfo>
 struct BlackHoleStatusResponse {
     installed: bool,
     device_name: Option<String>,
+}
+
+/// Install BlackHole driver
+/// Opens the official BlackHole GitHub page for user to download and install
+#[tauri::command]
+async fn install_blackhole_command(
+    app_handle: tauri::AppHandle,
+) -> Result<ApiResponse<bool>, String> {
+    install_blackhole_driver(&app_handle)
+        .map_err(|e| format!("{} Please visit https://github.com/ExistentialAudio/BlackHole manually to download the installer.", e))?;
+
+    Ok(ApiResponse::success(true))
+}
+
+/// Check if Homebrew is installed
+#[tauri::command]
+async fn check_homebrew_status_command() -> Result<ApiResponse<bool>, String> {
+    Ok(ApiResponse::success(system_audio::is_homebrew_installed()))
+}
+
+/// Install BlackHole via Homebrew (opens Terminal for password prompt)
+#[tauri::command]
+async fn install_blackhole_homebrew_command() -> Result<ApiResponse<bool>, String> {
+    system_audio::install_blackhole_via_homebrew().map_err(|e| {
+        format!(
+            "Homebrew installation failed: {}. Try the manual download option instead.",
+            e
+        )
+    })?;
+
+    Ok(ApiResponse::success(true))
 }
 
 /// Check if BlackHole virtual audio driver is installed
@@ -777,6 +834,28 @@ async fn list_whisper_models_command(
 
     let responses: Vec<WhisperModelInfoResponse> = models.into_iter().map(|m| m.into()).collect();
     Ok(ApiResponse::success(responses))
+}
+
+/// Open the models directory in Finder
+#[tauri::command]
+async fn open_models_folder_command(
+    app_handle: tauri::AppHandle,
+) -> Result<ApiResponse<String>, String> {
+    let models_dir = whisper::get_models_dir(&app_handle)
+        .map_err(|e| format!("Failed to get models dir: {}", e))?;
+
+    // Create the directory if it doesn't exist
+    std::fs::create_dir_all(&models_dir)
+        .map_err(|e| format!("Failed to create models dir: {}", e))?;
+
+    let path_str = models_dir.to_string_lossy().to_string();
+
+    std::process::Command::new("open")
+        .arg(&path_str)
+        .spawn()
+        .map_err(|e| format!("Failed to open folder: {}", e))?;
+
+    Ok(ApiResponse::success(path_str))
 }
 
 // ==================== TRANSCRIPTION COMMANDS ====================
@@ -987,10 +1066,15 @@ pub fn run() {
             start_recording_command,
             stop_recording_command,
             list_audio_devices_command,
+            test_microphone_command,
             check_blackhole_status_command,
+            install_blackhole_command,
+            check_homebrew_status_command,
+            install_blackhole_homebrew_command,
             check_whisper_model_command,
             download_whisper_model_command,
             list_whisper_models_command,
+            open_models_folder_command,
             transcribe_audio_command,
             check_ollama_status_command,
             generate_summary_command

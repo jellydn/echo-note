@@ -38,6 +38,12 @@ interface OllamaStatusResponse {
 	url: string;
 }
 
+// BlackHole status
+interface BlackHoleStatusResponse {
+	installed: boolean;
+	device_name: string | null;
+}
+
 // Settings keys
 const SETTING_AUDIO_DEVICE = "audio_device";
 const SETTING_WHISPER_MODEL_SIZE = "whisper_model_size";
@@ -49,9 +55,8 @@ const SETTING_API_ENDPOINT = "api_endpoint";
 const PROVIDER_LOCAL = "ollama";
 const PROVIDER_API = "api";
 
-// Model size options
-const MODEL_SIZES = ["tiny", "base", "small", "medium"] as const;
-type ModelSize = (typeof MODEL_SIZES)[number];
+// Model size type - driven by backend model list
+type ModelSize = string;
 
 export function SettingsView() {
 	// Settings state
@@ -69,6 +74,9 @@ export function SettingsView() {
 	const [error, setError] = useState<string | null>(null);
 	const [successMessage, setSuccessMessage] = useState<string | null>(null);
 	const [ollamaStatus, setOllamaStatus] = useState<OllamaStatusResponse | null>(null);
+	const [blackholeStatus, setBlackholeStatus] = useState<BlackHoleStatusResponse | null>(null);
+	const [hasHomebrew, setHasHomebrew] = useState<boolean>(false);
+	const [isInstallingBlackhole, setIsInstallingBlackhole] = useState(false);
 	const [isDownloading, setIsDownloading] = useState<string | null>(null);
 
 	// Download progress state
@@ -109,10 +117,7 @@ export function SettingsView() {
 				request: { key: SETTING_WHISPER_MODEL_SIZE },
 			});
 			if (whisperModelResponse.success && whisperModelResponse.data) {
-				const model = whisperModelResponse.data as ModelSize;
-				if (MODEL_SIZES.includes(model)) {
-					setWhisperModel(model);
-				}
+				setWhisperModel(whisperModelResponse.data);
 			}
 
 			const llmProviderResponse = await invoke<ApiResponse<string>>("get_setting_command", {
@@ -142,6 +147,20 @@ export function SettingsView() {
 			);
 			if (ollamaResponse.success && ollamaResponse.data) {
 				setOllamaStatus(ollamaResponse.data);
+			}
+
+			// Check BlackHole status
+			const blackholeResponse = await invoke<ApiResponse<BlackHoleStatusResponse>>(
+				"check_blackhole_status_command",
+			);
+			if (blackholeResponse.success && blackholeResponse.data) {
+				setBlackholeStatus(blackholeResponse.data);
+			}
+
+			// Check Homebrew status
+			const homebrewResponse = await invoke<ApiResponse<boolean>>("check_homebrew_status_command");
+			if (homebrewResponse.success && homebrewResponse.data !== null) {
+				setHasHomebrew(homebrewResponse.data);
 			}
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Failed to load settings");
@@ -249,7 +268,7 @@ export function SettingsView() {
 
 		try {
 			const response = await invoke<ApiResponse<string>>("download_whisper_model_command", {
-				model_size: modelSize,
+				modelSize,
 			});
 
 			if (response.success && response.data) {
@@ -266,9 +285,63 @@ export function SettingsView() {
 				setError(response.error || `Failed to download ${modelSize} model`);
 			}
 		} catch (err) {
-			setError(err instanceof Error ? err.message : `Failed to download ${modelSize} model`);
+			const msg =
+				err instanceof Error
+					? err.message
+					: typeof err === "string"
+						? err
+						: `Failed to download ${modelSize} model`;
+			setError(msg);
 		} finally {
 			setIsDownloading(null);
+		}
+	};
+
+	// Install BlackHole driver - opens download page in browser
+	const installBlackHole = async () => {
+		setIsInstallingBlackhole(true);
+		setError(null);
+		setSuccessMessage(null);
+
+		try {
+			const response = await invoke<ApiResponse<boolean>>("install_blackhole_command");
+
+			if (response.success && response.data) {
+				setSuccessMessage(
+					"Opened BlackHole download page in your browser. Download the .pkg file, open it, and follow the installation steps. " +
+						"After installation, click 'Check Again' to verify.",
+				);
+			} else {
+				setError(response.error || "Failed to open BlackHole download page");
+			}
+		} catch (err) {
+			setError(err instanceof Error ? err.message : "Failed to open BlackHole download page");
+		} finally {
+			setIsInstallingBlackhole(false);
+		}
+	};
+
+	// Install BlackHole via Homebrew
+	const installBlackHoleHomebrew = async () => {
+		setIsInstallingBlackhole(true);
+		setError(null);
+		setSuccessMessage(null);
+
+		try {
+			const response = await invoke<ApiResponse<boolean>>("install_blackhole_homebrew_command");
+
+			if (response.success && response.data) {
+				setSuccessMessage(
+					"Terminal opened with the install command. Enter your password if prompted, then reboot your Mac. " +
+						"After rebooting, click 'Check Again' to verify the installation.",
+				);
+			} else {
+				setError(response.error || "Failed to install BlackHole via Homebrew");
+			}
+		} catch (err) {
+			setError(err instanceof Error ? err.message : "Failed to install BlackHole via Homebrew");
+		} finally {
+			setIsInstallingBlackhole(false);
 		}
 	};
 
@@ -278,16 +351,10 @@ export function SettingsView() {
 		return `${Math.round(mb)} MB`;
 	};
 
-	// Get model display info
-
 	// Check if any model is downloaded (for first-launch prompt)
 	const hasAnyModelDownloaded = modelInfo.some((m) => m.is_downloaded);
 	const needsModelDownload = !hasAnyModelDownloaded && !isLoading;
 
-	// Get model display info
-	const getModelInfo = (size: string): WhisperModelInfo | undefined => {
-		return modelInfo.find((m) => m.size === size);
-	};
 	if (isLoading) {
 		return (
 			<div className="settings-view">
@@ -347,6 +414,68 @@ export function SettingsView() {
 						</select>
 						<p className="settings-hint">Select the microphone to use for recording</p>
 					</div>
+
+					{/* BlackHole System Audio */}
+					<div className="settings-field">
+						{/* biome-ignore lint/a11y/noLabelWithoutControl: Label serves as section header */}
+						<label className="settings-label">System Audio Capture</label>
+						<div className="blackhole-status">
+							{blackholeStatus?.installed ? (
+								<div className="blackhole-installed">
+									<span className="status-icon">✓</span>
+									<span className="status-text">
+										BlackHole installed -{" "}
+										{blackholeStatus.device_name || "System audio will be recorded"}
+									</span>
+								</div>
+							) : (
+								<div className="blackhole-missing">
+									<div className="blackhole-warning">
+										<span className="warning-icon">⚠️</span>
+										<span>
+											<strong>BlackHole not installed.</strong> Only microphone audio will be
+											recorded.
+										</span>
+									</div>
+									<div className="blackhole-buttons">
+										{hasHomebrew && (
+											<button
+												type="button"
+												className="blackhole-homebrew-button"
+												onClick={installBlackHoleHomebrew}
+												disabled={isInstallingBlackhole}
+											>
+												{isInstallingBlackhole
+													? "Installing via Homebrew..."
+													: "Install via Homebrew (Recommended)"}
+											</button>
+										)}
+										<button
+											type="button"
+											className="blackhole-install-button"
+											onClick={installBlackHole}
+											disabled={isInstallingBlackhole}
+										>
+											{isInstallingBlackhole ? "Opening Download Page..." : "Download Installer"}
+										</button>
+										<button
+											type="button"
+											className="blackhole-check-button"
+											onClick={loadSettings}
+											disabled={isLoading}
+										>
+											Check Again
+										</button>
+									</div>
+									<p className="settings-hint">
+										{hasHomebrew
+											? "Homebrew is the easiest way to install BlackHole. Alternatively, download the installer manually from GitHub."
+											: "BlackHole enables recording of system audio (e.g., meeting participants). Click 'Download Installer' to open the GitHub page, then download and install the driver. After installation, click 'Check Again'."}
+									</p>
+								</div>
+							)}
+						</div>
+					</div>
 				</section>
 
 				{/* Whisper Model Settings */}
@@ -357,34 +486,28 @@ export function SettingsView() {
 						{/* biome-ignore lint/a11y/noLabelWithoutControl: Label serves as section header for radio group */}
 						<label className="settings-label">Whisper Model Size</label>
 						<div className="model-options">
-							{MODEL_SIZES.map((size) => {
-								const info = getModelInfo(size);
-								const isDownloaded = info?.is_downloaded ?? false;
-								const isSelected = whisperModel === size;
-								const isDownloadingThis = isDownloading === size;
+							{modelInfo.map((info) => {
+								const isSelected = whisperModel === info.size;
+								const isDownloadingThis = isDownloading === info.size;
 
 								return (
-									<div key={size} className={`model-option ${isSelected ? "selected" : ""}`}>
+									<div key={info.size} className={`model-option ${isSelected ? "selected" : ""}`}>
 										<div className="model-option-info">
 											<input
 												type="radio"
-												id={`model-${size}`}
+												id={`model-${info.size}`}
 												name="whisper-model"
-												value={size}
+												value={info.size}
 												checked={isSelected}
-												onChange={() => handleWhisperModelChange(size)}
+												onChange={() => handleWhisperModelChange(info.size)}
 												disabled={isSaving}
 											/>
-											<label htmlFor={`model-${size}`} className="model-option-label">
-												<span className="model-name">
-													{size.charAt(0).toUpperCase() + size.slice(1)}
-												</span>
-												<span className="model-size">
-													{info ? formatFileSize(info.expected_size) : ""}
-												</span>
+											<label htmlFor={`model-${info.size}`} className="model-option-label">
+												<span className="model-name">{info.size}</span>
+												<span className="model-size">{formatFileSize(info.expected_size)}</span>
 											</label>
 										</div>
-										{isDownloaded ? (
+										{info.is_downloaded ? (
 											<span className="model-status downloaded">✓ Downloaded</span>
 										) : isDownloadingThis ? (
 											<div className="model-download-progress">
@@ -402,7 +525,7 @@ export function SettingsView() {
 											<button
 												type="button"
 												className="model-download-button"
-												onClick={() => downloadModel(size)}
+												onClick={() => downloadModel(info.size)}
 												disabled={isDownloading !== null}
 											>
 												Download
@@ -422,8 +545,40 @@ export function SettingsView() {
 							</div>
 						)}
 						<p className="settings-hint">
-							Larger models are more accurate but slower. Small is recommended for most use cases.
+							Larger models are more accurate but slower. Quantized (Q5) variants are smaller with
+							minimal quality loss. Small is recommended for most use cases.
 						</p>
+						<div className="model-links">
+							<button
+								type="button"
+								className="model-link-button"
+								onClick={async () => {
+									try {
+										await invoke("open_models_folder_command");
+									} catch {
+										/* ignore */
+									}
+								}}
+							>
+								📂 Open Models Folder
+							</button>
+							<a
+								href="https://huggingface.co/ggerganov/whisper.cpp"
+								target="_blank"
+								rel="noopener noreferrer"
+								className="model-link-button"
+								onClick={(e) => {
+									e.preventDefault();
+									invoke("plugin:opener|open_url", {
+										url: "https://huggingface.co/ggerganov/whisper.cpp",
+									}).catch(() => {
+										window.open("https://huggingface.co/ggerganov/whisper.cpp", "_blank");
+									});
+								}}
+							>
+								🌐 Whisper Models on HuggingFace
+							</a>
+						</div>
 					</div>
 				</section>
 

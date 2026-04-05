@@ -4,12 +4,38 @@ use std::io::Write;
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
 
-/// Whisper model sizes supported
-pub const WHISPER_MODELS: &[(&str, &str, u64)] = &[
-    ("tiny", "ggml-tiny.bin", 39_000_000),
-    ("base", "ggml-base.bin", 74_000_000),
-    ("small", "ggml-small.bin", 244_000_000),
-    ("medium", "ggml-medium.bin", 769_000_000),
+/// Whisper model sizes supported (name, filename, expected_bytes, display_label)
+pub const WHISPER_MODELS: &[(&str, &str, u64, &str)] = &[
+    ("tiny", "ggml-tiny.bin", 78_000_000, "Tiny"),
+    ("tiny-q5_1", "ggml-tiny-q5_1.bin", 33_000_000, "Tiny (Q5)"),
+    ("base", "ggml-base.bin", 149_000_000, "Base"),
+    ("base-q5_1", "ggml-base-q5_1.bin", 60_000_000, "Base (Q5)"),
+    ("small", "ggml-small.bin", 489_000_000, "Small"),
+    (
+        "small-q5_1",
+        "ggml-small-q5_1.bin",
+        190_000_000,
+        "Small (Q5)",
+    ),
+    ("medium", "ggml-medium.bin", 1_572_000_000, "Medium"),
+    (
+        "medium-q5_0",
+        "ggml-medium-q5_0.bin",
+        539_000_000,
+        "Medium (Q5)",
+    ),
+    (
+        "large-v3-turbo",
+        "ggml-large-v3-turbo.bin",
+        1_572_000_000,
+        "Large v3 Turbo",
+    ),
+    (
+        "large-v3-turbo-q5_0",
+        "ggml-large-v3-turbo-q5_0.bin",
+        574_000_000,
+        "Large v3 Turbo (Q5)",
+    ),
 ];
 
 /// Default model size (used for transcription)
@@ -36,8 +62,8 @@ pub fn get_models_dir(app_handle: &AppHandle) -> Result<PathBuf> {
 pub fn get_model_filename(model_size: &str) -> Result<&'static str> {
     WHISPER_MODELS
         .iter()
-        .find(|(size, _, _)| *size == model_size)
-        .map(|(_, filename, _)| *filename)
+        .find(|(size, _, _, _)| *size == model_size)
+        .map(|(_, filename, _, _)| *filename)
         .ok_or_else(|| anyhow::anyhow!("Invalid model size: {}", model_size))
 }
 
@@ -75,9 +101,9 @@ struct DownloadProgress {
 /// Download a Whisper model with progress reporting
 pub async fn download_whisper_model(app_handle: &AppHandle, model_size: &str) -> Result<PathBuf> {
     // Validate model size
-    let (_, filename, expected_size) = WHISPER_MODELS
+    let (_, filename, expected_size, _) = WHISPER_MODELS
         .iter()
-        .find(|(size, _, _)| *size == model_size)
+        .find(|(size, _, _, _)| *size == model_size)
         .ok_or_else(|| anyhow::anyhow!("Invalid model size: {}", model_size))?;
 
     let models_dir = get_models_dir(app_handle)?;
@@ -179,7 +205,7 @@ pub fn get_models_info(app_handle: &AppHandle) -> Result<Vec<ModelInfo>> {
 
     let mut infos = Vec::new();
 
-    for (size, filename, expected_size) in WHISPER_MODELS {
+    for (size, filename, expected_size, _) in WHISPER_MODELS {
         let model_path = models_dir.join(filename);
         let is_downloaded = model_path.exists();
 

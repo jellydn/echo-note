@@ -99,8 +99,8 @@
 				"Typecheck passes"
 			],
 			"priority": 7,
-			"passes": false,
-			"notes": "PRD gap: system audio capture only detects an existing BlackHole install. There is no exposed install flow or first-launch setup despite install_blackhole_driver() existing only as dead code in src-tauri/src/system_audio/mod.rs:75-104, and no UI guides Screen Recording / audio permissions. When BlackHole is missing, the app only logs a backend warning in src-tauri/src/lib.rs:591-596 instead of showing the clear fallback warning required by the PRD."
+			"passes": true,
+			"notes": "Implemented: Added install_blackhole_command Tauri command, BlackHole status UI in Settings with install button, warning when missing, and help text explaining BlackHole functionality. The install flow uses the bundled .pkg installer with administrator privileges."
 		},
 		{
 			"id": "US-008",

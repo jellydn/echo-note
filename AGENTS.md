@@ -135,7 +135,12 @@ Example: `feat: US-001 - Initialize Tauri + React project scaffold`
 - **Transcription**: Uses `whisper-rs` (whisper.cpp bindings), models stored in `~/Library/Application Support/echo-note/models/`
 - **LLM**: Ollama runs locally on port 11434, falls back to API if configured
 - **Database**: SQLite at app data directory, use SQLx for compile-time checked queries
-- **System audio**: Bundles BlackHole driver, mixes mic + system audio
+- **System audio**: Uses BlackHole virtual audio driver. The app:
+  - Detects BlackHole via `is_blackhole_installed()` using system_profiler
+  - Exposes `install_blackhole_command` Tauri command for driver installation
+  - Shows UI warning when BlackHole is missing (with install button)
+  - Mixes mic + BlackHole audio during recording when available
+  - Falls back to mic-only if BlackHole is not installed
 
 ## Ralph Agent Workflow
 

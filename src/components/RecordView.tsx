@@ -52,15 +52,19 @@ type RecordingState = "idle" | "recording" | "saving" | "processing";
 
 interface RecordViewProps {
 	onMeetingCreated?: (meetingId: number) => void;
+	onNavigateToSettings?: () => void;
 }
 
-export function RecordView({ onMeetingCreated }: RecordViewProps) {
+export function RecordView({ onMeetingCreated, onNavigateToSettings }: RecordViewProps) {
 	const [recordingState, setRecordingState] = useState<RecordingState>("idle");
 	const [recordingDuration, setRecordingDuration] = useState(0);
 	const [showTitleModal, setShowTitleModal] = useState(false);
 	const [meetingTitle, setMeetingTitle] = useState("");
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [micTestResult, setMicTestResult] = useState<"idle" | "testing" | "good" | "silent">(
+		"idle",
+	);
 	const [recordingResult, setRecordingResult] = useState<RecordingResponse | null>(null);
 
 	// Processing state
@@ -128,15 +132,21 @@ export function RecordView({ onMeetingCreated }: RecordViewProps) {
 			const response = await invoke<
 				ApiResponse<{ transcript_id: number; text: string; duration_seconds: number }>
 			>("transcribe_audio_command", {
-				meeting_id: meetingId,
-				audio_path: audioPath,
+				meetingId,
+				audioPath,
 			});
 
 			if (response.success && response.data) {
+				const text = response.data.text;
 				setTranscriptionResult({
 					transcript_id: response.data.transcript_id,
-					text: response.data.text,
+					text,
 				});
+				if (!text.trim()) {
+					setProcessingError(
+						"No speech detected in the recording. Make sure your microphone is working and try speaking closer to it.",
+					);
+				}
 				setProcessingStage("transcription_complete");
 			} else {
 				setProcessingError(response.error || "Transcription failed");
@@ -150,7 +160,7 @@ export function RecordView({ onMeetingCreated }: RecordViewProps) {
 
 	// Generate summary
 	const generateSummary = async () => {
-		if (!currentMeetingId || !transcriptionResult) return;
+		if (!currentMeetingId || !transcriptionResult?.text.trim()) return;
 
 		setProcessingStage("generating_summary");
 		setProcessingError(null);
@@ -159,7 +169,7 @@ export function RecordView({ onMeetingCreated }: RecordViewProps) {
 			const response = await invoke<ApiResponse<GenerateSummaryResponse>>(
 				"generate_summary_command",
 				{
-					meeting_id: currentMeetingId,
+					meetingId: currentMeetingId,
 					transcript: transcriptionResult.text,
 				},
 			);
@@ -196,6 +206,28 @@ export function RecordView({ onMeetingCreated }: RecordViewProps) {
 		setTranscriptionResult(null);
 		setProcessingError(null);
 		setCurrentMeetingId(null);
+	};
+
+	// Test microphone
+	const testMicrophone = async () => {
+		setMicTestResult("testing");
+		setError(null);
+
+		try {
+			const response = await invoke<ApiResponse<number>>("test_microphone_command");
+			if (response.success && response.data !== null) {
+				// Peak level > 0.01 means we detected some audio
+				setMicTestResult(response.data > 0.01 ? "good" : "silent");
+			} else {
+				setError(response.error || "Mic test failed");
+				setMicTestResult("idle");
+			}
+		} catch (err) {
+			const msg =
+				err instanceof Error ? err.message : typeof err === "string" ? err : "Mic test failed";
+			setError(msg);
+			setMicTestResult("idle");
+		}
 	};
 
 	// Start recording
@@ -426,13 +458,34 @@ export function RecordView({ onMeetingCreated }: RecordViewProps) {
 					</button>
 				</div>
 
-				{/* Instructions */}
+				{/* Instructions & Mic Test */}
 				{!isRecording && !isSaving && !isProcessing && (
 					<div className="record-instructions">
 						<p>Click the button above to start recording your meeting.</p>
 						<p className="record-hint">
 							The app will capture both microphone and system audio (if BlackHole is installed).
 						</p>
+						<div className="mic-test">
+							<button
+								type="button"
+								className="mic-test-button"
+								onClick={testMicrophone}
+								disabled={micTestResult === "testing"}
+							>
+								{micTestResult === "testing" ? "🎙️ Listening..." : "🎙️ Test Microphone"}
+							</button>
+							{micTestResult === "good" && (
+								<span className="mic-test-result good">✓ Microphone is working</span>
+							)}
+							{micTestResult === "silent" && (
+								<span className="mic-test-result silent">
+									⚠ No audio detected —{" "}
+									<button type="button" className="mic-test-link" onClick={onNavigateToSettings}>
+										check your mic in Settings
+									</button>
+								</span>
+							)}
+						</div>
 					</div>
 				)}
 

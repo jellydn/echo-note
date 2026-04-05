@@ -62,3 +62,36 @@
   - **Special "default" handling**: Keep a special "default" ID that maps to `host.default_input_device()` for user convenience
   - **Matching logic**: The recording thread already had partial/fuzzy matching, but exact name matching is more reliable
   - **State consistency**: Frontend stores device ID → Backend retrieves by ID → Recording thread matches by name
+
+---
+
+## [Sun Apr 6 2025 09:30:00 UTC] - US-007
+- What was implemented:
+  - Exposed `install_blackhole_command` Tauri command to allow UI-driven BlackHole installation
+  - Removed `#[allow(dead_code)]` from `install_blackhole_driver()` in system_audio/mod.rs
+  - Added BlackHole status section to SettingsView with:
+    - Status indicator showing whether BlackHole is installed
+    - Install button with loading state
+    - Warning message when BlackHole is missing (clear fallback as required by PRD)
+    - Help text explaining what BlackHole does
+  - Added CSS styles for BlackHole UI components (light and dark mode)
+  - Updated AGENTS.md with BlackHole system audio documentation
+- Files changed:
+  - `src-tauri/src/lib.rs` - Added install_blackhole_command, imported install_blackhole_driver
+  - `src-tauri/src/system_audio/mod.rs` - Removed #[allow(dead_code)] from public functions
+  - `src/components/SettingsView.tsx` - Added BlackHole status UI and install function
+  - `src/App.css` - Added BlackHole component styles
+  - `AGENTS.md` - Updated system audio documentation
+  - `scripts/ralph/prd.json` - Marked US-007 as passing
+- Quality checks passed:
+  - TypeScript typecheck: `tsc --noEmit` ✓
+  - Biome lint: `bun run lint` ✓
+  - Rust typecheck: `cargo check` ✓
+  - Rust lint: `cargo clippy` ✓
+  - Rust format: `cargo fmt --check` ✓
+- **Learnings for future iterations:**
+  - **Dead code activation**: When a function exists but is marked `#[allow(dead_code)]`, it likely needs to be exposed through a Tauri command
+  - **UI for backend features**: Backend-only features should have corresponding UI indicators and controls in Settings
+  - **biome-ignore pattern**: Use `{/* biome-ignore lint/a11y/noLabelWithoutControl: Label serves as section header */}` for section labels without associated inputs (consistent with existing codebase pattern)
+  - **CSS organization**: Add component-specific styles to App.css with both light and dark mode variants
+  - **Pattern**: When exposing Rust functions to frontend, add to imports, create command wrapper, and register in invoke_handler list

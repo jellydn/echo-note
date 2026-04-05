@@ -495,6 +495,67 @@ pub fn list_audio_devices() -> Result<Vec<(String, String)>> {
     Ok(device_list)
 }
 
+/// Test a microphone by capturing a brief sample and returning the peak audio level.
+/// Returns a value between 0.0 (silence) and 1.0 (max).
+pub fn test_microphone(device_id: &str) -> Result<f32> {
+    let host = cpal::default_host();
+
+    let device = if device_id == "default" {
+        host.default_input_device()
+            .context("No default input device available")?
+    } else {
+        let mut found = None;
+        for d in host.input_devices().context("Failed to get devices")? {
+            if let Ok(name) = d.name() {
+                if name == device_id {
+                    found = Some(d);
+                    break;
+                }
+            }
+        }
+        found.unwrap_or(
+            host.default_input_device()
+                .context("No default input device")?,
+        )
+    };
+
+    let config = device
+        .default_input_config()
+        .context("Failed to get input config")?;
+
+    let peak = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let peak_clone = Arc::clone(&peak);
+    let channels = config.channels() as usize;
+
+    let stream = device
+        .build_input_stream(
+            &config.into(),
+            move |data: &[f32], _: &_| {
+                for frame in data.chunks(channels) {
+                    let sample: f32 = frame.iter().map(|s| s.abs()).sum::<f32>() / channels as f32;
+                    let current = f32::from_bits(peak_clone.load(Ordering::Relaxed));
+                    if sample > current {
+                        peak_clone.store(sample.to_bits(), Ordering::Relaxed);
+                    }
+                }
+            },
+            |err| log::error!("Mic test stream error: {}", err),
+            None,
+        )
+        .context("Failed to build test stream")?;
+
+    stream.play().context("Failed to start mic test")?;
+
+    // Capture for 1 second
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    drop(stream);
+
+    let peak_val = f32::from_bits(peak.load(Ordering::Relaxed));
+    log::info!("Mic test peak level: {}", peak_val);
+    Ok(peak_val)
+}
+
 /// Get the default audio directory for recordings
 pub fn get_recordings_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf> {
     let app_dir = app_handle

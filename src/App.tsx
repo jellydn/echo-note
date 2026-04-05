@@ -22,6 +22,7 @@ function App() {
 							setSelectedMeetingId(meetingId);
 							setCurrentView("meeting-detail");
 						}}
+						onNavigateToSettings={() => setCurrentView("settings")}
 					/>
 				);
 			case "history":
