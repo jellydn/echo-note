@@ -1,0 +1,269 @@
+{
+  "project": "EchoNote",
+  "branchName": "ralph/local-ai-meeting-assistant",
+  "description": "Local AI Meeting Assistant — a privacy-first native desktop app (macOS) that records meeting audio, transcribes locally via Whisper, and generates structured summaries via Ollama.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Initialize Tauri + React project scaffold",
+      "description": "As a developer, I need the project scaffolded with Tauri v2 and React (TypeScript) so all subsequent stories have a working foundation.",
+      "acceptanceCriteria": [
+        "Tauri v2 project initialized with React + TypeScript frontend",
+        "App launches and shows a blank shell window with sidebar placeholder (Record, History, Settings)",
+        "Rust backend compiles and serves the frontend",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Set up SQLite database and meetings table",
+      "description": "As a developer, I need a SQLite database with a meetings table so meeting data can be persisted.",
+      "acceptanceCriteria": [
+        "SQLite database created at app data directory on first launch",
+        "Meetings table with columns: id, title, date, duration_seconds, audio_path, created_at",
+        "Rust module exposes functions: create_meeting, get_meeting, list_meetings, delete_meeting",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Add transcript and summary tables to database",
+      "description": "As a developer, I need transcript and summary tables linked to meetings for storage.",
+      "acceptanceCriteria": [
+        "Transcripts table: id, meeting_id (FK), content (TEXT), created_at",
+        "Summaries table: id, meeting_id (FK), key_points (TEXT), decisions (TEXT), action_items (TEXT), created_at",
+        "Rust module exposes CRUD functions for transcripts and summaries",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Add settings/preferences storage",
+      "description": "As a developer, I need a settings table to persist user preferences.",
+      "acceptanceCriteria": [
+        "Settings table with key-value pairs stored in SQLite",
+        "Supports keys: audio_device, whisper_model_size, llm_provider, api_key, api_endpoint",
+        "Rust functions: get_setting, set_setting with defaults",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Record audio from microphone",
+      "description": "As a user, I want to record audio from my microphone so meeting audio is captured.",
+      "acceptanceCriteria": [
+        "Rust backend captures audio from the selected input device using cpal",
+        "Audio is saved as a WAV file in the app data directory",
+        "Tauri commands exposed: start_recording, stop_recording",
+        "stop_recording returns the saved file path and duration",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "List available audio input devices",
+      "description": "As a user, I want to see available microphones so I can choose the right one.",
+      "acceptanceCriteria": [
+        "Tauri command list_audio_devices returns array of {id, name} for input devices",
+        "Includes system default device",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Bundle BlackHole for system audio capture",
+      "description": "As a user, I want system audio captured so both sides of a meeting are recorded.",
+      "acceptanceCriteria": [
+        "BlackHole virtual audio driver is bundled with the app",
+        "On first launch, app installs BlackHole if not present",
+        "Recording mixes microphone + system audio into a single WAV",
+        "If BlackHole setup fails, fall back to mic-only with a warning logged",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Download and manage Whisper model",
+      "description": "As a user, I want the app to download the Whisper model automatically so I don't need manual setup.",
+      "acceptanceCriteria": [
+        "Tauri command download_whisper_model downloads the specified model size (tiny/base/small/medium)",
+        "Default model is 'small'",
+        "Model saved to ~/Library/Application Support/echo-note/models/",
+        "Tauri command check_whisper_model returns whether model is already downloaded",
+        "Download progress is reported via Tauri events",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Transcribe audio using Whisper",
+      "description": "As a user, I want my recorded audio transcribed locally after recording stops.",
+      "acceptanceCriteria": [
+        "Tauri command transcribe_audio takes audio file path, runs whisper-rs transcription",
+        "Transcription progress reported via Tauri events",
+        "Completed transcript text saved to transcripts table in SQLite",
+        "Returns transcript text on completion",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Generate summary via Ollama",
+      "description": "As a user, I want a structured summary generated from my transcript via local Ollama.",
+      "acceptanceCriteria": [
+        "Tauri command generate_summary sends transcript to Ollama API at http://localhost:11434",
+        "Prompt instructs LLM to output: Key Points (3-5 bullets), Decisions, Action Items",
+        "Parsed summary saved to summaries table in SQLite",
+        "Returns structured summary on completion",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Optional API fallback for summarization",
+      "description": "As a user, I want to optionally use a cloud API for summarization if I prefer.",
+      "acceptanceCriteria": [
+        "If llm_provider setting is 'api', generate_summary uses the configured api_endpoint and api_key",
+        "API call uses OpenAI-compatible chat completions format",
+        "Same prompt and parsing as Ollama path",
+        "Default provider remains 'ollama'",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Build Record view UI",
+      "description": "As a user, I want a recording screen with start/stop button so I can control meeting capture.",
+      "acceptanceCriteria": [
+        "Record view is the default/home screen in the sidebar",
+        "Large Start Recording button that toggles to Stop Recording",
+        "Recording timer shown while active",
+        "Visual recording indicator (pulsing dot or similar)",
+        "After stopping, user is prompted to enter a meeting title (default: 'Meeting — [date] [time]')",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Build post-recording processing UI",
+      "description": "As a user, I want to see transcription and summary progress after recording stops.",
+      "acceptanceCriteria": [
+        "After recording stops and title is entered, show a processing screen",
+        "Transcription progress bar with percentage",
+        "After transcription completes, show 'Generate Summary' button",
+        "Summary generation shows a loading spinner",
+        "On completion, navigate to the meeting detail view",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Build Meeting History view UI",
+      "description": "As a user, I want to browse past meetings in a chronological list.",
+      "acceptanceCriteria": [
+        "History view accessible from sidebar",
+        "Lists meetings sorted by date (newest first)",
+        "Each entry shows: title, date/time, duration",
+        "Clicking an entry navigates to meeting detail view",
+        "Delete button on each entry with confirmation dialog",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Build Meeting Detail view UI",
+      "description": "As a user, I want to view the transcript and summary for a past meeting.",
+      "acceptanceCriteria": [
+        "Detail view shows meeting title (editable inline), date, and duration at the top",
+        "Transcript displayed in a scrollable panel",
+        "Summary displayed in a structured card with sections: Key Points, Decisions, Action Items",
+        "Copy-to-clipboard buttons for transcript and summary",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Build Settings view UI",
+      "description": "As a user, I want a settings page to configure audio device, Whisper model, and LLM provider.",
+      "acceptanceCriteria": [
+        "Settings view accessible from sidebar",
+        "Audio input device dropdown (populated from list_audio_devices)",
+        "Whisper model size selector (tiny/base/small/medium) with download button",
+        "LLM Provider toggle: Local (Ollama) or API",
+        "If API selected, show API key and endpoint input fields",
+        "Privacy warning shown when API mode is selected: 'Data will leave your device'",
+        "Settings persist via set_setting commands",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Whisper model download UI in Settings",
+      "description": "As a user, I want to see download progress when fetching the Whisper model from Settings.",
+      "acceptanceCriteria": [
+        "Download button next to model size selector triggers download_whisper_model",
+        "Progress bar shows download percentage",
+        "Button changes to 'Downloaded' checkmark when model exists",
+        "On first app launch, if no model exists, Settings view prompts download",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
