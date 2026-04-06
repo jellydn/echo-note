@@ -1,150 +1,86 @@
-# Coding Conventions
+# Code Conventions
 
-**Analysis Date:** 2026-04-06
+## TypeScript / React
 
-## Naming Patterns
+### Naming
+- Components: `PascalCase` named exports (e.g., `RecordView`, `SettingsView`)
+- Hooks: `camelCase` starting with `use` (e.g., `useRecording`)
+- Files: Match primary export name (component = `PascalCase.tsx`, utilities = `camelCase.ts`)
 
-**Files:**
-- React components: PascalCase matching export (e.g., `App.tsx` exports `App`)
-- Rust modules: `snake_case` directory with `mod.rs` (e.g., `audio/mod.rs`)
-- Type definitions: Co-located or `types.ts` (not currently used)
+### Imports
+- Order: Tauri APIs → React hooks → local components → relative siblings
+- Example:
+  ```ts
+  import { invoke } from "@tauri-apps/api/core";
+  import { listen } from "@tauri-apps/api/event";
+  import { useState, useEffect, useCallback } from "react";
+  import RecordView from "./components/RecordView";
+  ```
 
-**Functions:**
-- Rust: `snake_case` (e.g., `start_recording`, `get_meeting_command`)
-- TypeScript: `camelCase` (e.g., `setCurrentView`, `renderView`)
-- React components: PascalCase (e.g., `App`, `RecordView`)
+### Types
+- Interfaces defined at the top of each file for props and API responses
+- `ApiResponse<T>` generic used for all Tauri command return values
+- `strict: true` in tsconfig — no implicit any, unused locals/params are errors
 
-**Variables:**
-- Rust: `snake_case` (e.g., `audio_recorder`, `db_pool`)
-- TypeScript: `camelCase` (e.g., `currentView`, `device_infos`)
-- Constants: `SCREAMING_SNAKE_CASE` (e.g., `DEFAULT_WHISPER_MODEL_SIZE`)
+### Formatting (Biome)
+- Tab indentation
+- 100 character line width
+- Double quotes for strings
+- Semicolons always
 
-**Types:**
-- Rust: PascalCase (e.g., `AudioRecorder`, `MeetingResponse`)
-- TypeScript: PascalCase with explicit types (e.g., `View = "record" | "history"`)
+### Error Handling
+- Frontend uses try/catch with typed error messages
+- User-facing errors shown as toast notifications or inline messages
+- Tauri `invoke()` calls wrapped in try/catch blocks
 
-## Code Style
+## Rust
 
-**Formatting:**
-- TypeScript: Biome (configured in `package.json` scripts, no separate config)
-- Rust: rustfmt with defaults (no custom `.rustfmt.toml`)
-- Indent: 4 spaces (observed in `App.tsx` tabs)
+### Naming
+- Functions and variables: `snake_case`
+- Types, structs, enums, traits: `PascalCase`
+- Constants: `SCREAMING_SNAKE_CASE`
+- Modules: `snake_case` (directory-based with `mod.rs`)
 
-**Linting:**
-- TypeScript: Biome `bun run lint`
-- Rust: Clippy `cargo clippy` (no warnings allowed per AGENTS.md)
-- Format check: `cargo fmt --check` and Biome check
+### Error Handling
+- `anyhow::Result<T>` with `.context("descriptive message")` for propagation
+- Tauri commands return `Result<ApiResponse<T>, String>` — never panic across FFI boundary
+- Use `?` operator for propagation; convert to string at command boundary
+- Logging before returning errors: `log::warn!()`, `log::info!()`, `log::debug!()`
 
-**Quality Gates (per AGENTS.md):**
-```bash
-cargo check && bun run typecheck  # Type checking
-bun run lint                      # Biome
-cargo clippy                      # Rust lint
-cargo fmt --check                 # Rust format
-```
-
-## Import Organization
-
-**TypeScript (observed in `App.tsx`):**
-```typescript
-import { useState } from "react";     // React first
-import "./App.css";                    // Relative styles
-```
-
-**Expected pattern (per AGENTS.md):**
-1. React
-2. Third-party
-3. Internal (absolute)
-4. Relative (siblings)
-
-**Rust (observed in `lib.rs`):**
-- Standard library: `use std::...`
-- External crates: `use serde::...`, `use tauri::...`
-- Internal modules: `use crate::audio::...`
-- Grouped logically with blank lines between groups
-
-## Error Handling
-
-**Patterns:**
-- Rust: `anyhow::Result` internally, `Result<T, String>` for Tauri commands
-- Mapping: `.map_err(|e| format!("Failed to X: {}", e))?`
-- TypeScript: Try/catch with typed error messages (to be implemented)
-
-**Example from `lib.rs`:**
+### Tauri Command Pattern
 ```rust
 #[tauri::command]
-async fn start_recording_command(...) -> Result<ApiResponse<bool>, String> {
-    let device_id = get_setting(&state.db, "audio_device", DEFAULT_AUDIO_DEVICE)
-        .await
-        .map_err(|e| format!("Failed to get audio device setting: {}", e))?;
-    // ...
+async fn my_command(
+    state: State<'_, AppStateExt>,
+    param: String,
+) -> Result<ApiResponse<MyType>, String> {
+    let result = do_work(&param)
+        .map_err(|e| format!("Failed to do work: {}", e))?;
+    Ok(ApiResponse::success(result))
 }
 ```
 
-## Logging
+### Response Wrapper
+- `ApiResponse<T>` struct with `success(data)` and `error(message)` constructors
+- All Tauri commands use this wrapper for consistent frontend handling
 
-**Framework:** `log` crate (Rust)
+### Module Organization
+- Each subsystem in its own directory: `audio/`, `db/`, `llm/`, `whisper/`, `system_audio/`
+- All Tauri command handlers centralized in `lib.rs`
+- Derived traits on public structs: `#[derive(Debug, Serialize, Deserialize)]`
 
-**Patterns:**
-- `log::info!()` for progress (e.g., "Download progress: {}%")
-- `log::warn!()` for non-fatal issues (e.g., "Failed to emit download progress")
-- `eprintln!()` for stream errors in audio thread
+## Shared Patterns
 
-**Frontend:**
-- Console logging not yet implemented
-- Tauri events used for progress (`transcription-progress`)
+### IPC (Frontend ↔ Backend)
+- Frontend: `invoke("command_name", { param })` from `@tauri-apps/api/core`
+- Backend: `#[tauri::command]` async functions in `lib.rs`
+- Events: `listen("event-name", handler)` for streaming/progress updates
 
-## Comments
+### Data Types
+- Request structs: `Deserialize` on Rust side
+- Response structs: `Serialize` on Rust side + matching TypeScript interfaces on frontend
+- Dates: ISO 8601 strings (`chrono::DateTime` serialized as strings)
 
-**When to Comment:**
-- Module-level docs for public APIs
-- Complex audio mixing/resampling logic
-- Tauri command documentation
-
-**Example from `audio/mod.rs`:**
-```rust
-/// Mix two audio streams together
-/// If sample rates differ, the second stream is resampled to match the first
-fn mix_audio_streams(...) -> Vec<f32> { ... }
-```
-
-## Function Design
-
-**Size:**
-- Tauri commands: ~10-30 lines (good)
-- `transcribe_audio()`: ~150 lines (long, could refactor)
-- `run_single_recording_thread()`: ~80 lines (acceptable for complexity)
-
-**Parameters:**
-- Prefer structs for multiple params (e.g., `CreateMeetingRequest`)
-- State passed as `State<'_, AppStateExt>`
-
-**Return Values:**
-- Always use `ApiResponse<T>` wrapper for consistency
-- Database IDs returned as `i64`
-
-## Module Design
-
-**Exports:**
-- Rust: Explicit re-exports in `lib.rs` with `use crate::...`
-- TypeScript: Default exports for components (`export default App`)
-
-**Barrel Files:**
-- Not used currently
-- Each module accessed directly via `mod.rs`
-
-## TypeScript-Specific
-
-**Strictness:**
-- All props, state, functions typed (per AGENTS.md)
-- Prefer explicit types over `any`
-- Use `unknown` when type is truly unknown
-
-**React Patterns:**
-- Functional components with hooks
-- `useState` for local state
-- Type unions for view state: `type View = "record" | "history" | "settings"`
-
----
-
-*Convention analysis: 2026-04-06*
+### Logging
+- Rust: `log::info!()`, `log::warn!()`, `log::debug!()` with contextual messages
+- Frontend: `console.log/error` for dev debugging

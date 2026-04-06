@@ -1,177 +1,98 @@
-# Codebase Concerns
+# Technical Concerns
 
-**Analysis Date:** 2026-04-06
+## Known Issues & TODOs
+- No explicit TODO/FIXME/HACK comments found in the source code (well-disciplined)
+- Issues exist nonetheless — identified through code analysis below
 
-## Tech Debt
+## Security Concerns
 
-**Audio Thread Complexity:**
-- Issue: cpal `Stream` is not `Send`/`Sync` requiring complex thread management
-- Files: `src-tauri/src/audio/mod.rs` (lines 63-277)
-- Impact: Risk of thread panics, hard to test, potential race conditions
-- Fix approach: Abstract into actor pattern or use message passing exclusively
+### High Priority
+- **API Key Plaintext Storage**: API keys stored unencrypted in SQLite `settings` table — should use macOS Keychain
+- **Transcript Privacy**: Meeting transcriptions not encrypted at rest in the database
+- **SSRF Risk**: User-provided API endpoints (in settings) not validated for scheme or allowlisted domains
+- **No Input Sanitization**: Meeting titles and API endpoints accepted without sanitization
 
-**Large Command Functions:**
-- Issue: `transcribe_audio_command` and `transcribe_audio` are ~150+ lines
-- Files: `src-tauri/src/lib.rs`, `src-tauri/src/whisper/mod.rs`
-- Impact: Hard to read, test, and maintain
-- Fix approach: Extract into smaller functions with single responsibilities
+## Error Handling Issues
 
-**Monolithic lib.rs:**
-- Issue: All Tauri commands in single ~600 line file
-- File: `src-tauri/src/lib.rs`
-- Impact: Merge conflicts, hard to navigate
-- Fix approach: Split into command modules (e.g., `commands/meetings.rs`, `commands/audio.rs`)
+### Panics in Production Code
+6 `unwrap()` / `expect()` calls identified in production paths:
+- `src-tauri/src/whisper/mod.rs:283` — path `unwrap()` can panic on invalid UTF-8
+- `src-tauri/src/audio/mod.rs:369` — `expect()` on device detection panics if device unavailable
+- Multiple `Mutex::lock().unwrap()` calls throughout the audio module
 
-**Minimal Frontend:**
-- Issue: `App.tsx` has placeholder views only
-- File: `src/App.tsx`
-- Impact: Not a functional app yet, UI needs full implementation
-- Fix approach: Implement views per PRD user stories
+### Silent Error Loss
+- `eprintln!()` used in recording threads instead of proper error propagation
+- Errors in background audio threads are swallowed, not surfaced to UI
 
-## Known Issues
+### Race Conditions
+- Recording state cloned without guaranteed synchronization
+- Potential state inconsistencies between frontend-perceived state and actual recorder state
 
-**Audio Thread Panic Recovery:**
-- Symptoms: Recording thread panics leave app in bad state
-- Files: `src-tauri/src/audio/mod.rs` (lines 205-224)
-- Trigger: Device disconnection during recording
-- Workaround: Restart app, no auto-recovery
+## Performance Concerns
 
-**TODO/FIXME Comments:**
-- None found in current codebase (good sign)
+### Memory
+- Entire audio recordings held in memory (Vec<f32>) before writing to disk — problematic for recordings >30 minutes
+- Whisper models loaded entirely into RAM (1–2GB+ for medium/large models); no lazy loading
+- Audio resampling done in-memory at transcription time
+- Full transcript text sent to LLM without chunking for long meetings
 
-## Security Considerations
-
-**Unencrypted API Keys:**
-- Risk: API keys stored as plain text in SQLite
-- Files: `src-tauri/src/db/mod.rs` (settings table)
-- Current mitigation: None - local app only
-- Recommendations: Use macOS Keychain or encrypted storage
-
-**CSP Disabled:**
-- Risk: Content Security Policy is `null` (disabled)
-- File: `src-tauri/tauri.conf.json` (line 22)
-- Current mitigation: Local app, no web content
-- Recommendations: Set appropriate CSP for production
-
-**File Path Traversal:**
-- Risk: User-controlled paths could access arbitrary files
-- Files: `src-tauri/src/audio/mod.rs` (recording path generation)
-- Current mitigation: Timestamps used in filenames
-- Recommendations: Validate and sanitize all paths
-
-**Audio Data in Memory:**
-- Risk: Raw audio data held in memory during recording
-- Files: `src-tauri/src/audio/mod.rs` (lines 91-92)
-- Current mitigation: Memory cleared after save
-- Recommendations: Stream to disk for long recordings
-
-## Performance Bottlenecks
-
-**Transcription Blocking:**
-- Problem: Whisper transcription runs on blocking thread but still blocks Tauri
-- Files: `src-tauri/src/lib.rs` (lines 476-490)
-- Cause: `tokio::task::spawn_blocking` used but progress events still synchronous
-- Improvement path: Use async channels for progress, consider process isolation
-
-**Audio Buffer Growth:**
-- Problem: Audio data grows unbounded in `Vec<f32>` during recording
-- Files: `src-tauri/src/audio/mod.rs` (line 92)
-- Cause: All audio held in memory until recording stops
-- Improvement path: Stream to temp file, or use circular buffer with disk offload
-
-**Model Loading:**
-- Problem: Whisper model loaded into memory on each transcription
-- Files: `src-tauri/src/whisper/mod.rs` (lines 290-296)
-- Cause: No model caching between transcriptions
-- Improvement path: Cache `WhisperContext` in app state
+### Processing
+- No timeout on external API calls (Ollama / OpenAI) — can hang indefinitely
+- No retry mechanism for failed transcriptions or LLM requests
 
 ## Fragile Areas
 
-**Device Matching Logic:**
-- Files: `src-tauri/src/audio/mod.rs` (lines 314-337)
-- Why fragile: Partial string matching for BlackHole/microphone
-- Safe modification: Add explicit device ID storage in settings
-- Test coverage: No tests for device selection
+### LLM Response Parsing
+- `llm/mod.rs` uses regex-based parsing of LLM output — brittle and model-dependent
+- Any change in Ollama/OpenAI response format can break summary extraction
 
-**JSON Parsing in System Audio:**
-- Files: `src-tauri/src/system_audio/mod.rs` (lines 62-78)
-- Why fragile: Manual string parsing instead of serde_json
-- Safe modification: Use proper JSON parsing with structs
-- Test coverage: Single basic test only
+### Audio Thread Architecture
+- `audio/mod.rs` (568 lines) manages multiple responsibilities: device enumeration, recording, mixing, WAV writing
+- `cpal::Stream` not `Send`/`Sync` — workaround via dedicated thread adds complexity and potential deadlocks
 
-**Sample Rate Conversion:**
-- Files: `src-tauri/src/whisper/mod.rs` (lines 362-375)
-- Why fragile: Linear interpolation resampling is low quality
-- Safe modification: Use proper resampling library (e.g., `rubato`)
-- Test coverage: Single basic test
+### Large Files (Complexity Risk)
+- `src-tauri/src/lib.rs`: 1,087 lines — all 40 Tauri commands in one file
+- `src/components/SettingsView.tsx`: 680 lines
+- `src/components/RecordView.tsx`: 566 lines
+- `src-tauri/src/audio/mod.rs`: 568 lines
 
-## Scaling Limits
+## Missing Features / Gaps
 
-**Audio Recording:**
-- Current capacity: Memory-limited (RAM holds all audio)
-- Limit: ~30-60 minutes at 16kHz before memory pressure
-- Scaling path: Stream to disk, implement chunked recording
+### Robustness
+- No retry on failed transcriptions or API calls
+- No cleanup of incomplete/failed recordings
+- No timeout on HTTP requests (`reqwest` without `.timeout()`)
+- No database migration versioning system — schema managed inline
 
-**Whisper Model Size:**
-- Current capacity: medium model (~769MB)
-- Limit: Larger models need more RAM, slower inference
-- Scaling path: GPU acceleration, model quantization
+### Frontend
+- No React error boundaries — a component crash brings down the entire app
+- No loading states for some async operations
 
-**Database:**
-- Current capacity: Single SQLite file
-- Limit: Concurrent writes, large meeting history
-- Scaling path: Connection pooling already implemented
+### Operational
+- Whisper transcription language hardcoded to English (no language detection)
+- No rate limiting on API calls
+- No structured/persistent logging (logs not written to file)
+- No auto-update mechanism
+- No crash reporting
 
-## Dependencies at Risk
+## Technical Debt
 
-**whisper-rs:**
-- Risk: Bindings to whisper.cpp C++ library, compilation complexity
-- Impact: Build failures, platform-specific issues
-- Migration plan: Alternative Rust-native ASR (none mature yet)
+### Test Coverage
+- ~50 lines of tests across ~3,317 lines of Rust code (~1.5% coverage)
+- Zero frontend tests
+- No integration or E2E tests
 
-**cpal:**
-- Risk: Platform-specific audio backend issues (CoreAudio on macOS)
-- Impact: Recording failures on some systems
-- Migration plan: Platform-specific backends (e.g., `coreaudio-rs` directly)
+### Architecture
+- `lib.rs` acts as a monolithic command handler — all 40 commands in one file
+- `SettingsView.tsx` and `RecordView.tsx` are oversized and handle too many concerns
+- No React global state (no Context or Zustand) — some prop/state duplication across views
 
-**BlackHole Driver:**
-- Risk: Third-party kernel extension dependency
-- Impact: macOS security changes may block installation
-- Migration plan: ScreenCaptureKit API (macOS 13+) for system audio
+### Compliance / Privacy
+- No user consent tracking for stored audio/transcript data
+- No data export or deletion mechanism (GDPR gap)
+- Model downloads fixed to app data directory (can't configure external drive)
 
-## Missing Critical Features
-
-**LLM Summary Generation:**
-- Problem: Ollama integration referenced but not implemented
-- Files: `src-tauri/src/lib.rs` (imports only, no commands)
-- Blocks: Cannot generate meeting summaries
-- Priority: High (core feature per PRD)
-
-**Frontend UI Implementation:**
-- Problem: All views are placeholders
-- Files: `src/App.tsx` (lines 10-35)
-- Blocks: App not usable
-- Priority: High
-
-**Error Handling UX:**
-- Problem: No frontend error display, toast notifications
-- Blocks: Users can't diagnose failures
-- Priority: Medium
-
-## Test Coverage Gaps
-
-**Untested Critical Paths:**
-1. Audio recording start/stop
-2. Database CRUD operations
-3. Tauri command handlers
-4. File I/O operations
-5. Model download with progress
-
-**Risk Assessment:**
-- High: Audio recording (hardware dependent, hard to reproduce issues)
-- Medium: Database queries (SQLx compile-time checking helps)
-- Medium: Tauri commands (integration tests needed)
-
----
-
-*Concerns audit: 2026-04-06*
+## Dependencies Concerns
+- All major dependencies appear actively maintained (Tauri v2, whisper-rs 0.13, reqwest 0.12, sqlx 0.8)
+- `whisper-rs` may lag behind upstream whisper.cpp releases
+- `cpal` has platform-specific maintenance variability on non-macOS platforms

@@ -1,152 +1,78 @@
-# Codebase Structure
+# Directory Structure
 
-**Analysis Date:** 2026-04-06
-
-## Directory Layout
-
+## Top-Level Layout
 ```
-project-root/
-├── src/                      # React frontend (TypeScript)
-│   ├── App.tsx              # Main app component with navigation
-│   ├── App.css              # Component styles
-│   ├── main.tsx             # React entry point
-│   └── vite-env.d.ts        # Vite type declarations
-├── src-tauri/               # Rust backend (Tauri)
-│   ├── src/
-│   │   ├── main.rs          # Rust entry point
-│   │   ├── lib.rs           # Tauri commands and app setup
-│   │   ├── audio/mod.rs     # Audio recording (cpal)
-│   │   ├── db/mod.rs        # Database (SQLx)
-│   │   ├── system_audio/    # BlackHole integration
-│   │   │   └── mod.rs
-│   │   └── whisper/mod.rs   # Transcription (whisper-rs)
-│   ├── Cargo.toml           # Rust dependencies
-│   ├── Cargo.lock           # Rust lockfile
-│   ├── tauri.conf.json      # Tauri configuration
-│   ├── build.rs             # Build script
-│   ├── capabilities/          # Tauri permissions
-│   ├── gen/                 # Auto-generated schemas
-│   ├── icons/               # App icons
-│   └── resources/           # Bundled resources
-├── package.json             # Node dependencies
-├── bun.lockb                # Bun lockfile
-├── tsconfig.json            # TypeScript config
-├── AGENTS.md                # Agent guidelines
-├── justfile                 # Just commands
-└── scripts/ralph/           # Ralph agent scripts
-    ├── prd.json             # User stories
-    ├── progress.txt         # Learned patterns
-    └── ralph.sh             # Agent runner
+2026-04-06-echo-note/
+├── src/                    # React frontend (TypeScript)
+├── src-tauri/              # Rust backend (Tauri)
+│   ├── src/                # Rust source files
+│   ├── migrations/         # SQLx database migrations
+│   ├── gen/                # Auto-generated Tauri schemas (don't edit)
+│   ├── Cargo.toml          # Rust dependencies
+│   ├── tauri.conf.json     # Tauri app configuration
+│   └── build.rs            # Build script
+├── tasks/                  # PRD and planning docs
+├── scripts/ralph/          # Autonomous agent scripts
+├── .planning/codebase/     # Codebase documentation (this directory)
+├── package.json            # Node.js dependencies & scripts
+├── vite.config.ts          # Frontend build configuration
+├── tsconfig.json           # TypeScript configuration
+├── biome.json              # Linting and formatting rules
+└── justfile                # Convenience commands (just check, just lint, etc.)
 ```
 
-## Directory Purposes
+## Frontend (src/)
+```
+src/
+├── main.tsx                # React app entry point (10 lines)
+├── App.tsx                 # View router + sidebar navigation (104 lines)
+├── App.css                 # Global styles
+└── components/
+    ├── RecordView.tsx       # Recording UI (566 lines)
+    ├── HistoryView.tsx      # Meetings list (80+ lines)
+    ├── MeetingDetailView.tsx # Meeting details view
+    └── SettingsView.tsx     # Settings panel (680 lines)
+```
 
-**`src/` (Frontend):**
-- Purpose: React UI components and application logic
-- Contains: TypeScript/TSX files, CSS
-- Key files: `App.tsx` (main UI), `main.tsx` (entry)
-- Note: Minimal currently - scaffolded Tauri template
+## Backend (src-tauri/)
+```
+src-tauri/
+├── src/
+│   ├── main.rs             # Entry point — delegates to lib.rs (7 lines)
+│   ├── lib.rs              # All 40 Tauri commands + app setup (1087 lines)
+│   ├── db/
+│   │   └── mod.rs          # Database schema, queries, CRUD (540 lines)
+│   ├── audio/
+│   │   └── mod.rs          # Dual-stream audio recording via CPAL (568 lines)
+│   ├── whisper/
+│   │   └── mod.rs          # Local transcription via whisper-rs
+│   ├── llm/
+│   │   └── mod.rs          # Summary generation (Ollama + OpenAI)
+│   └── system_audio/
+│       └── mod.rs          # BlackHole driver detection
+├── migrations/             # SQLx migration files (.sql)
+├── gen/                    # Auto-generated (do not edit)
+└── tauri.conf.json         # Window, bundle, security config
+```
 
-**`src-tauri/src/` (Backend):**
-- Purpose: Rust application logic and Tauri commands
-- Contains: Module-based organization
-- Key files: `lib.rs` (all commands), `main.rs` (entry)
-
-**`src-tauri/src/audio/`:**
-- Purpose: Audio capture and WAV writing
-- Contains: `AudioRecorder` struct with thread management
-- Pattern: Handles cpal's !Send/!Sync Stream via dedicated threads
-
-**`src-tauri/src/db/`:**
-- Purpose: SQLite database operations
-- Contains: CRUD for meetings, transcripts, summaries, settings
-- Pattern: SQLx with compile-time checked queries
-
-**`src-tauri/src/system_audio/`:**
-- Purpose: BlackHole virtual audio driver integration
-- Contains: Device detection, installer reference
-- Pattern: macOS-specific via `system_profiler`
-
-**`src-tauri/src/whisper/`:**
-- Purpose: Whisper model management and transcription
-- Contains: Model download, transcription with progress events
-- Pattern: Blocking thread pool for ML work
-
-**`scripts/ralph/`:**
-- Purpose: Ralph autonomous agent configuration
-- Contains: PRD, progress tracking, agent runner
-- Note: Work in progress
-
-## Key File Locations
-
-**Entry Points:**
-- `src/main.tsx`: React application bootstrap
-- `src-tauri/src/main.rs`: Rust application bootstrap
-- `src-tauri/src/lib.rs`: Tauri app builder and command registration
-
-**Configuration:**
-- `package.json`: Frontend deps and scripts
-- `src-tauri/Cargo.toml`: Rust deps
-- `src-tauri/tauri.conf.json`: Tauri window, bundle, security config
-- `tsconfig.json`: TypeScript compiler options
-
-**Core Logic:**
-- `src-tauri/src/lib.rs`: All Tauri commands (~600 lines)
-- `src-tauri/src/audio/mod.rs`: Recording implementation (~400 lines)
-- `src-tauri/src/db/mod.rs`: Database layer (~350 lines)
-- `src-tauri/src/whisper/mod.rs`: Transcription (~380 lines)
-
-**Testing:**
-- `src-tauri/src/whisper/mod.rs`: Unit tests at bottom (lines 358-377)
-- `src-tauri/src/system_audio/mod.rs`: Unit tests at bottom (lines 112-121)
-
-**Generated (Don't Edit):**
-- `src-tauri/gen/`: Auto-generated by Tauri CLI
+## Configuration & Scripts
+- `justfile` — Convenience aliases: `just check`, `just lint`, `just fmt`, `just pre-commit`
+- `scripts/ralph/` — Ralph autonomous agent scripts + `prd.json` + `progress.txt`
+- `tasks/` — PRD documents and planning artifacts
+- `.planning/codebase/` — This codebase map
 
 ## Naming Conventions
 
-**Files:**
-- Components: PascalCase (e.g., `App.tsx`)
-- Utilities: camelCase or snake_case (Rust)
-- Modules: `mod.rs` for directory modules
+### Files
+- React components: `PascalCase.tsx` (e.g., `RecordView.tsx`, `SettingsView.tsx`)
+- Rust modules: `snake_case/mod.rs` (e.g., `audio/mod.rs`, `system_audio/mod.rs`)
+- Migrations: numbered SQL files in `migrations/`
 
-**Directories:**
-- kebab-case for multi-word names (e.g., `src-tauri/`)
-- Descriptive names (e.g., `system_audio/`, not `audio/`)
-
-## Where to Add New Code
-
-**New Feature (e.g., Summary Generation):**
-- LLM client: `src-tauri/src/llm/mod.rs` (new module)
-- Commands: Add to `src-tauri/src/lib.rs` (follow existing pattern)
-- UI: New component in `src/components/` (new directory)
-- Types: Add to relevant `*Response` structs in `lib.rs`
-
-**New Component/Module:**
-- Frontend: `src/components/NewComponent.tsx`
-- Backend: `src-tauri/src/new_module/mod.rs`, declare in `lib.rs` mods
-
-**Utilities:**
-- Shared helpers: Module-specific or new `src-tauri/src/util/mod.rs`
-
-## Special Directories
-
-**`src-tauri/gen/`:**
-- Purpose: Auto-generated Tauri bindings
-- Generated: Yes (by `cargo tauri dev`/`build`)
-- Committed: Typically yes (for CI), but can be gitignored
-
-**`src-tauri/target/`:**
-- Purpose: Rust build artifacts
-- Generated: Yes
-- Committed: No (in `.gitignore`)
-
-**`src-tauri/resources/`:**
-- Purpose: Bundled app resources
-- Contains: BlackHole installer `.pkg`
-- Generated: No
-- Committed: Yes
-
----
-
-*Structure analysis: 2026-04-06*
+### Code
+- React components: `PascalCase` named exports
+- Hooks: `camelCase` starting with `use`
+- Rust functions: `snake_case`
+- Rust types/structs/enums: `PascalCase`
+- Rust constants: `SCREAMING_SNAKE_CASE`
+- Tauri commands: `snake_case` (e.g., `start_recording`, `get_meeting`)
+- Database tables: `snake_case`, plural (e.g., `meetings`, `transcripts`)
