@@ -4,11 +4,6 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HistoryView } from "../HistoryView";
 
-// Mock Tauri API
-vi.mock("@tauri-apps/api/core", () => ({
-	invoke: vi.fn(),
-}));
-
 const mockMeetings = [
 	{
 		id: 1,

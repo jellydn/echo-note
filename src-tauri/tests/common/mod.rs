@@ -2,13 +2,31 @@ use echo_note_lib::db::*;
 use sqlx::{Pool, Sqlite};
 use std::str::FromStr;
 
-/// Create a temporary test database pool
+/// Create a temporary test database pool with shared in-memory database
+/// Uses a thread-local static to ensure each test thread gets its own database
+/// while allowing multiple concurrent connections within that thread
 pub async fn setup_test_db() -> Pool<Sqlite> {
-    // Use in-memory SQLite for fast tests
+    use std::cell::RefCell;
+
+    thread_local! {
+        static DB_COUNTER: RefCell<u32> = const { RefCell::new(0) };
+    }
+
+    // Generate a unique name for this test's database (per-thread isolation)
+    let db_id = DB_COUNTER.with(|c| {
+        let mut counter = c.borrow_mut();
+        *counter += 1;
+        *counter
+    });
+
+    // Use shared cache in-memory database with unique name per test instance
+    // This allows multiple connections to share the same database
+    let url = format!("file:test_db_{}?mode=memory&cache=shared", db_id);
+
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
-        .max_connections(1)
+        .max_connections(5)
         .connect_with(
-            sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")
+            sqlx::sqlite::SqliteConnectOptions::from_str(&url)
                 .unwrap()
                 .create_if_missing(true)
                 .foreign_keys(true),
@@ -16,8 +34,7 @@ pub async fn setup_test_db() -> Pool<Sqlite> {
         .await
         .expect("Failed to create test database pool");
 
-    // Run migrations - relative to tests/ directory, migrations is at src-tauri/migrations/
-    // Tests run from src-tauri/ so we use ./migrations
+    // Run migrations
     sqlx::migrate!("./migrations")
         .run(&pool)
         .await

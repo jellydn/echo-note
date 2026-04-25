@@ -4,15 +4,6 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RecordView } from "../RecordView";
 
-// Mock Tauri API
-vi.mock("@tauri-apps/api/core", () => ({
-	invoke: vi.fn(),
-}));
-
-vi.mock("@tauri-apps/api/event", () => ({
-	listen: vi.fn().mockResolvedValue(() => {}),
-}));
-
 describe("RecordView", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();

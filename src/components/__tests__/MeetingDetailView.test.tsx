@@ -4,11 +4,6 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MeetingDetailView } from "../MeetingDetailView";
 
-// Mock Tauri API
-vi.mock("@tauri-apps/api/core", () => ({
-	invoke: vi.fn(),
-}));
-
 const mockMeeting = {
 	id: 1,
 	title: "Product Planning Meeting",
@@ -175,9 +170,8 @@ describe("MeetingDetailView", () => {
 		await userEvent.clear(input);
 		await userEvent.type(input, "Updated Meeting Title");
 
-		// Save button shows checkmark symbol
-		const saveButton = document.querySelector(".title-edit-button.save");
-		if (!saveButton) throw new Error("Save button not found");
+		// Save button
+		const saveButton = screen.getByRole("button", { name: /save title/i });
 		await userEvent.click(saveButton);
 
 		await waitFor(() => {
@@ -212,9 +206,8 @@ describe("MeetingDetailView", () => {
 		const input = screen.getByRole("textbox");
 		await userEvent.type(input, " Some Extra Text");
 
-		// Cancel button shows X symbol
-		const cancelButton = document.querySelector(".title-edit-button.cancel");
-		if (!cancelButton) throw new Error("Cancel button not found");
+		// Cancel button
+		const cancelButton = screen.getByRole("button", { name: /cancel editing/i });
 		await userEvent.click(cancelButton);
 
 		// Original title should still be displayed
@@ -246,10 +239,8 @@ describe("MeetingDetailView", () => {
 			expect(screen.getByText("Transcript")).toBeInTheDocument();
 		});
 
-		// Find the copy button in the transcript card (the one showing "📋 Copy")
-		const transcriptCard = screen.getByText("Transcript").closest(".meeting-detail-card");
-		const copyButton = transcriptCard?.querySelector(".copy-button");
-		if (!copyButton) throw new Error("Copy button not found");
+		// Find the copy button for transcript
+		const copyButton = screen.getByRole("button", { name: /copy transcript/i });
 		await userEvent.click(copyButton);
 
 		expect(navigator.clipboard.writeText).toHaveBeenCalledWith(mockTranscript.content);
@@ -280,10 +271,8 @@ describe("MeetingDetailView", () => {
 			expect(screen.getByText("Summary")).toBeInTheDocument();
 		});
 
-		// Find the copy button in the summary card (the one showing "📋 Copy")
-		const summaryCard = screen.getByText("Summary").closest(".meeting-detail-card");
-		const copyButton = summaryCard?.querySelector(".copy-button");
-		if (!copyButton) throw new Error("Copy button not found");
+		// Find the copy button for summary
+		const copyButton = screen.getByRole("button", { name: /copy summary/i });
 		await userEvent.click(copyButton);
 
 		expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
