@@ -104,7 +104,10 @@ pub async fn generate_summary_api(
         temperature: 0.7,
     };
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .context("Failed to build HTTP client")?;
 
     let response = client
         .post(api_endpoint)
@@ -174,7 +177,10 @@ pub async fn generate_summary(
     };
 
     // Send request to Ollama
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .context("Failed to build HTTP client")?;
     let url = format!("{}/api/generate", ollama_url);
 
     log::debug!("Sending request to Ollama at {}", url);
@@ -342,7 +348,10 @@ fn clean_section(content: &str) -> String {
 
 /// Check if Ollama is available at the given URL
 pub async fn check_ollama_status(ollama_url: &str) -> Result<bool> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap_or_default();
     let url = format!("{}/api/tags", ollama_url);
 
     match client.get(&url).send().await {

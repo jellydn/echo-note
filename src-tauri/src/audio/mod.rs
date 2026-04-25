@@ -64,8 +64,10 @@ impl AudioRecorder {
     }
 
     pub fn is_recording(&self) -> bool {
-        let state = self.state.lock().unwrap();
-        state.is_recording
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_recording
     }
 
     /// Start recording audio from the microphone and optionally from system audio
@@ -123,7 +125,9 @@ impl AudioRecorder {
 
             // Update state to include system audio
             {
-                let mut state_guard = state.lock().unwrap();
+                let mut state_guard = state
+                    .lock()
+                    .map_err(|e| anyhow::anyhow!("Failed to lock recording state: {}", e))?;
                 state_guard.system_state = Some(system_state);
             }
 
@@ -174,22 +178,35 @@ impl AudioRecorder {
         if let Some(handle) = self.mic_handle.take() {
             match handle.audio_thread.join() {
                 Ok(Ok(state)) => mic_data = Some(state),
-                Ok(Err(e)) => eprintln!("Mic recording error: {}", e),
-                Err(_) => eprintln!("Mic recording thread panicked"),
+                Ok(Err(e)) => {
+                    log::error!("Mic recording error: {}", e);
+                    return Err(anyhow::anyhow!("Mic recording failed: {}", e));
+                }
+                Err(_) => {
+                    return Err(anyhow::anyhow!("Mic recording thread panicked"));
+                }
             }
         }
 
         if let Some(handle) = self.system_handle.take() {
             match handle.audio_thread.join() {
                 Ok(Ok(state)) => system_data = Some(state),
-                Ok(Err(e)) => eprintln!("System audio recording error: {}", e),
-                Err(_) => eprintln!("System audio recording thread panicked"),
+                Ok(Err(e)) => {
+                    log::error!("System audio recording error: {}", e);
+                    // System audio failure is non-fatal — fall back to mic only
+                    log::warn!("Falling back to mic-only audio");
+                }
+                Err(_) => {
+                    log::error!(
+                        "System audio recording thread panicked — falling back to mic only"
+                    );
+                }
             }
         }
 
         // Get timing info
         let duration = {
-            let state_guard = self.state.lock().unwrap();
+            let state_guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
             state_guard
                 .start_time
                 .map(|t| t.elapsed().as_secs_f64())
@@ -257,7 +274,7 @@ impl AudioRecorder {
             .to_string();
 
         // Reset state
-        let mut current_state = self.state.lock().unwrap();
+        let mut current_state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         *current_state = RecordingState::default();
 
         Ok(RecordingResult {
@@ -364,10 +381,14 @@ fn run_single_recording_thread(
             }
         }
 
-        found_device.unwrap_or_else(|| {
-            host.default_input_device()
-                .expect("No default input device")
-        })
+        found_device
+            .or_else(|| host.default_input_device())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "No audio input device available for '{}'",
+                    device_id_or_name
+                )
+            })?
     };
 
     let config = device
@@ -413,7 +434,7 @@ fn run_single_recording_thread(
             Err(_) => {
                 // Timeout, check if we should continue
                 if !{
-                    let guard = state.lock().unwrap();
+                    let guard = state.lock().unwrap_or_else(|e| e.into_inner());
                     guard.is_recording
                 } {
                     break;
@@ -446,7 +467,7 @@ where
 {
     let channels = config.channels as usize;
 
-    let err_fn = |err| eprintln!("Stream error: {}", err);
+    let err_fn = |err| log::error!("Audio stream error: {}", err);
 
     let stream = device.build_input_stream(
         config,
@@ -456,7 +477,10 @@ where
             }
 
             // Convert samples to f32 and store
-            let mut buffer = audio_data.lock().unwrap();
+            let Ok(mut buffer) = audio_data.lock() else {
+                log::error!("Audio buffer lock poisoned — dropping samples");
+                return;
+            };
             for frame in data.chunks(channels) {
                 // Mix channels to mono if needed
                 let sample: f32 =

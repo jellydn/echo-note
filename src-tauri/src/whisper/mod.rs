@@ -124,7 +124,10 @@ pub async fn download_whisper_model(app_handle: &AppHandle, model_size: &str) ->
     log::info!("Downloading Whisper model {} from {}", model_size, url);
 
     // Download with streaming
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(600))
+        .build()
+        .context("Failed to build HTTP client")?;
     let response = client
         .get(&url)
         .send()
@@ -280,7 +283,10 @@ pub fn transcribe_audio(
 
     // Load the model
     let ctx_params = WhisperContextParameters::default();
-    let ctx = WhisperContext::new_with_params(model_path.to_str().unwrap(), ctx_params)
+    let model_path_str = model_path
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("Model path contains invalid UTF-8: {:?}", model_path))?;
+    let ctx = WhisperContext::new_with_params(model_path_str, ctx_params)
         .map_err(|e| anyhow::anyhow!("Failed to load Whisper model: {:?}", e))?;
 
     // Create state for transcription
