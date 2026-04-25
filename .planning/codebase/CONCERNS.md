@@ -1,98 +1,205 @@
-# Technical Concerns
+# Codebase Concerns
 
-## Known Issues & TODOs
-- No explicit TODO/FIXME/HACK comments found in the source code (well-disciplined)
-- Issues exist nonetheless — identified through code analysis below
+**Analysis Date:** 2025-04-25
 
-## Security Concerns
+## Tech Debt
 
-### High Priority
-- **API Key Plaintext Storage**: API keys stored unencrypted in SQLite `settings` table — should use macOS Keychain
-- **Transcript Privacy**: Meeting transcriptions not encrypted at rest in the database
-- **SSRF Risk**: User-provided API endpoints (in settings) not validated for scheme or allowlisted domains
-- **No Input Sanitization**: Meeting titles and API endpoints accepted without sanitization
+**Audio Thread Pattern:**
+- Issue: Using `std::sync::Mutex` poison recovery via `unwrap_or_else(|e| e.into_inner())` in multiple places - this is a workaround for potential lock poisoning
+- Files: `src-tauri/src/audio/mod.rs` (lines 69, 209, 277, 437)
+- Impact: If a thread panics while holding a lock, the mutex becomes "poisoned". The current recovery approach may mask underlying issues
+- Fix approach: Consider using `parking_lot::Mutex` which doesn't have poisoning, or refactor to use message passing/channels exclusively
 
-## Error Handling Issues
+**Hardcoded Model Configuration:**
+- Issue: API model is hardcoded to `gpt-4o-mini` in the LLM command handler
+- Files: `src-tauri/src/commands/llm.rs` (line 76)
+- Impact: Users cannot configure which API model to use when using cloud providers
+- Fix approach: Add a setting for API model selection, similar to how Ollama model is configurable
 
-### Panics in Production Code
-6 `unwrap()` / `expect()` calls identified in production paths:
-- `src-tauri/src/whisper/mod.rs:283` — path `unwrap()` can panic on invalid UTF-8
-- `src-tauri/src/audio/mod.rs:369` — `expect()` on device detection panics if device unavailable
-- Multiple `Mutex::lock().unwrap()` calls throughout the audio module
+**Date Format Parsing:**
+- Issue: Manual RFC3339 date parsing in command handlers instead of using strongly typed deserialization
+- Files: `src-tauri/src/commands/meetings.rs` (lines 46-48)
+- Impact: Date parsing errors happen at runtime; frontend/backend coupling on string formats
+- Fix approach: Use `chrono::DateTime<chrono::Utc>` directly in the request struct with proper serde annotations
 
-### Silent Error Loss
-- `eprintln!()` used in recording threads instead of proper error propagation
-- Errors in background audio threads are swallowed, not surfaced to UI
+## Known Bugs
 
-### Race Conditions
-- Recording state cloned without guaranteed synchronization
-- Potential state inconsistencies between frontend-perceived state and actual recorder state
+**Transcription Audio Processing:**
+- Symptoms: Stereo audio channel handling in `whisper/mod.rs` has a flawed conversion logic - samples are zeroed for non-first channels then averaged, potentially causing audio quality issues
+- Files: `src-tauri/src/whisper/mod.rs` (lines 319-345)
+- Trigger: Recording with multi-channel input devices
+- Workaround: None identified - audio may have reduced quality for stereo sources
 
-## Performance Concerns
+**System Audio Thread Panic Handling:**
+- Symptoms: System audio thread panics are logged but silently ignored (mic-only fallback)
+- Files: `src-tauri/src/audio/mod.rs` (lines 199-203)
+- Trigger: BlackHole device issues or cpal errors during system audio capture
+- Workaround: Recording continues with microphone only, but user is not notified of system audio failure
 
-### Memory
-- Entire audio recordings held in memory (Vec<f32>) before writing to disk — problematic for recordings >30 minutes
-- Whisper models loaded entirely into RAM (1–2GB+ for medium/large models); no lazy loading
-- Audio resampling done in-memory at transcription time
-- Full transcript text sent to LLM without chunking for long meetings
+**API Endpoint URL Construction:**
+- Symptoms: Fragile string manipulation for API endpoint URLs
+- Files: `src-tauri/src/commands/llm.rs` (lines 66-74)
+- Trigger: User enters malformed or unexpected API endpoint format
+- Workaround: URL normalization logic attempts to handle common cases but edge cases may fail
 
-### Processing
-- No timeout on external API calls (Ollama / OpenAI) — can hang indefinitely
-- No retry mechanism for failed transcriptions or LLM requests
+## Security Considerations
+
+**API Key Storage:**
+- Risk: API keys stored in SQLite database without encryption
+- Files: `src-tauri/src/db/mod.rs` (settings table), `src-tauri/src/commands/llm.rs`
+- Current mitigation: Keys are stored locally only; app claims "privacy-first" approach
+- Recommendations: 
+  - Use macOS Keychain or similar OS-level secure storage
+  - At minimum, encrypt sensitive settings with a device-specific key
+  - Consider marking the key field as "sensitive" in the database schema
+
+**CSP Configuration:**
+- Risk: Content Security Policy is set to `null` in Tauri config
+- Files: `src-tauri/tauri.conf.json` (line 21)
+- Current mitigation: None - effectively disabled
+- Recommendations: Define a restrictive CSP appropriate for the local app context
+
+**External Process Execution:**
+- Risk: Command injection via `system_audio/mod.rs` osascript execution for Homebrew installation
+- Files: `src-tauri/src/system_audio/mod.rs` (lines 201-210)
+- Current mitigation: Arguments are hardcoded, not user-input
+- Recommendations: Sanitize any future user input that might flow into command execution
+
+## Performance Bottlenecks
+
+**Transcription Blocking:**
+- Problem: Whisper transcription runs entirely on the main async runtime via `spawn_blocking`
+- Files: `src-tauri/src/commands/transcription.rs` (lines 56-61)
+- Cause: Large audio files can take significant time to transcribe, blocking a thread pool thread
+- Improvement path: Consider using a dedicated thread pool or process pool for CPU-intensive transcription work
+
+**Audio Buffer Growth:**
+- Problem: Audio recording accumulates samples in unbounded `Vec<f32>` buffers in memory
+- Files: `src-tauri/src/audio/mod.rs` (lines 88, 119, 480-488)
+- Cause: Long recordings could theoretically exhaust memory
+- Improvement path: Implement circular buffering or stream-to-disk during recording for very long sessions
+
+**Model Download:**
+- Problem: Large model downloads (up to 1.5GB) happen in-memory before writing to disk
+- Files: `src-tauri/src/whisper/mod.rs` (lines 147-182)
+- Cause: `bytes_stream` is consumed chunk by chunk, which is good, but no disk caching during download
+- Improvement path: Current implementation is reasonable but verify temp file handling for interrupted downloads
 
 ## Fragile Areas
 
-### LLM Response Parsing
-- `llm/mod.rs` uses regex-based parsing of LLM output — brittle and model-dependent
-- Any change in Ollama/OpenAI response format can break summary extraction
+**BlackHole Detection:**
+- Files: `src-tauri/src/system_audio/mod.rs`
+- Why fragile: Multiple fallback detection methods (system_profiler JSON, line parsing, HAL directory check) indicate platform-dependent reliability issues
+- Safe modification: Test on various macOS versions; consider CoreAudio API bindings instead of CLI tools
+- Test coverage: Only unit test for JSON parsing; no integration tests for actual device detection
 
-### Audio Thread Architecture
-- `audio/mod.rs` (568 lines) manages multiple responsibilities: device enumeration, recording, mixing, WAV writing
-- `cpal::Stream` not `Send`/`Sync` — workaround via dedicated thread adds complexity and potential deadlocks
+**Audio Device Name Matching:**
+- Files: `src-tauri/src/audio/mod.rs` (lines 351-392)
+- Why fragile: String-based partial matching for BlackHole and microphone devices may fail with localized device names or different BlackHole variants
+- Safe modification: Use stable device IDs where possible; add more robust fuzzy matching
+- Test coverage: No tests for device selection logic
 
-### Large Files (Complexity Risk)
-- `src-tauri/src/lib.rs`: 1,087 lines — all 40 Tauri commands in one file
-- `src/components/SettingsView.tsx`: 680 lines
-- `src/components/RecordView.tsx`: 566 lines
-- `src-tauri/src/audio/mod.rs`: 568 lines
+**LLM Response Parsing:**
+- Files: `src-tauri/src/llm/mod.rs` (lines 272-297)
+- Why fragile: Summary section extraction relies on exact string matching for headers ("KEY POINTS:", "DECISIONS:", etc.) with case variations
+- Safe modification: Use structured JSON responses from LLMs when available; add more robust parsing with regex or markdown parsing
+- Test coverage: Has unit tests for parsing, but limited edge case coverage
 
-## Missing Features / Gaps
+**Audio Sample Format Handling:**
+- Files: `src-tauri/src/audio/mod.rs` (lines 407-423)
+- Why fragile: Only handles F32, I16, U16 sample formats; others cause hard error
+- Safe modification: Add more format conversions or better error messaging for unsupported devices
+- Test coverage: No tests for sample format conversion
 
-### Robustness
-- No retry on failed transcriptions or API calls
-- No cleanup of incomplete/failed recordings
-- No timeout on HTTP requests (`reqwest` without `.timeout()`)
-- No database migration versioning system — schema managed inline
+## Scaling Limits
 
-### Frontend
-- No React error boundaries — a component crash brings down the entire app
-- No loading states for some async operations
+**Database:**
+- Current capacity: SQLite with 5 connection pool; no stated limits on meeting count
+- Limit: Single-writer limitations of SQLite; concurrent writes may queue
+- Scaling path: For high concurrency, migrate to PostgreSQL or implement write queueing
 
-### Operational
-- Whisper transcription language hardcoded to English (no language detection)
-- No rate limiting on API calls
-- No structured/persistent logging (logs not written to file)
-- No auto-update mechanism
-- No crash reporting
+**Audio Recording:**
+- Current capacity: Limited by available RAM (buffers held in memory)
+- Limit: Long meetings (>2 hours) may consume significant memory before WAV writing
+- Scaling path: Implement chunked recording or streaming write to disk
 
-## Technical Debt
+**Transcript Storage:**
+- Current capacity: Stored as TEXT in SQLite
+- Limit: Very long transcripts may hit SQLite row limits or performance degradation
+- Scaling path: Consider compression or chunked storage for large transcripts
 
-### Test Coverage
-- ~50 lines of tests across ~3,317 lines of Rust code (~1.5% coverage)
-- Zero frontend tests
-- No integration or E2E tests
+## Dependencies at Risk
 
-### Architecture
-- `lib.rs` acts as a monolithic command handler — all 40 commands in one file
-- `SettingsView.tsx` and `RecordView.tsx` are oversized and handle too many concerns
-- No React global state (no Context or Zustand) — some prop/state duplication across views
+**whisper-rs:**
+- Risk: Bindings to whisper.cpp which evolves rapidly; API may change
+- Impact: Transcription may break on updates
+- Migration plan: Pin to specific version; monitor whisper.cpp releases
 
-### Compliance / Privacy
-- No user consent tracking for stored audio/transcript data
-- No data export or deletion mechanism (GDPR gap)
-- Model downloads fixed to app data directory (can't configure external drive)
+**cpal:**
+- Risk: Cross-platform audio is complex; macOS-specific issues may arise
+- Impact: Audio recording failures on certain hardware configurations
+- Migration plan: Consider platform-specific backends (CoreAudio directly) if issues persist
 
-## Dependencies Concerns
-- All major dependencies appear actively maintained (Tauri v2, whisper-rs 0.13, reqwest 0.12, sqlx 0.8)
-- `whisper-rs` may lag behind upstream whisper.cpp releases
-- `cpal` has platform-specific maintenance variability on non-macOS platforms
+**BlackHole Driver:**
+- Risk: Third-party kernel driver dependency; may break with macOS updates
+- Impact: System audio capture completely fails
+- Migration plan: Monitor BlackHole project; document manual installation steps; consider alternative virtual audio drivers
+
+**ollama/reqwest:**
+- Risk: Local LLM server may not be running; network timeouts
+- Impact: Summary generation fails or hangs
+- Migration plan: Implement better timeout handling; consider bundled LLM option
+
+## Missing Critical Features
+
+**Real-time Transcription:**
+- Problem: Transcription only starts after recording stops
+- Blocks: Live captioning or real-time meeting assistance features
+
+**Audio File Cleanup:**
+- Problem: Original WAV files are never deleted; storage grows unbounded
+- Blocks: Long-term usage without manual file management
+
+**Meeting Export:**
+- Problem: No export functionality for transcripts/summaries (Markdown, PDF, etc.)
+- Blocks: Sharing meeting notes outside the app
+
+**Search Functionality:**
+- Problem: No search across meeting transcripts or summaries
+- Blocks: Finding information in past meetings
+
+**Speaker Diarization:**
+- Problem: No identification of who spoke when
+- Blocks: Multi-speaker meeting analysis
+
+## Test Coverage Gaps
+
+**Integration Tests:**
+- What's not tested: End-to-end audio recording flow, database operations with real SQLite, actual Whisper transcription
+- Files: All `src-tauri/src/` modules
+- Risk: Command handlers may have integration issues not caught by unit tests
+- Priority: High
+
+**Error Handling Paths:**
+- What's not tested: Error recovery in audio recording, database connection failures, network timeouts during model download
+- Files: `src-tauri/src/audio/mod.rs`, `src-tauri/src/db/mod.rs`, `src-tauri/src/whisper/mod.rs`
+- Risk: Error paths may panic or leave system in inconsistent state
+- Priority: High
+
+**Frontend Component Tests:**
+- What's not tested: React components have no test suite
+- Files: `src/components/*.tsx`
+- Risk: UI regressions not caught before release
+- Priority: Medium
+
+**Concurrency Tests:**
+- What's not tested: Multi-threaded audio recording, concurrent database access
+- Files: `src-tauri/src/audio/mod.rs`
+- Risk: Race conditions in audio buffer access
+- Priority: Medium
+
+**Cross-Platform Tests:**
+- What's not tested: App is macOS-only but structure suggests potential cross-platform support
+- Files: `src-tauri/src/system_audio/mod.rs` (macOS-specific)
+- Risk: Hardcoded macOS assumptions may break if ported
+- Priority: Low (current scope is macOS only)

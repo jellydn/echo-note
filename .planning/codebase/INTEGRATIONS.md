@@ -1,66 +1,105 @@
 # External Integrations
 
-## Databases
-- SQLite via sqlx 0.8
-- Local database file: `echo_note.db` in app data directory
-- Tables: `meetings`, `transcripts`, `summaries`, `settings`
-- Foreign key constraints enabled
-- Connection pool: max 5 concurrent connections
+**Analysis Date:** 2026-04-25
 
-## External APIs & Services
-- OpenAI-compatible APIs (Chat Completions endpoint)
-- API Key authentication via Bearer token
-- Configurable endpoint URL (default: https://api.openai.com/v1)
-- Model: gpt-4o-mini (configurable)
-- Used for meeting summary generation as alternative to Ollama
+## APIs & External Services
 
-## Local Services
-- **Ollama** (localhost:11434) - LLM for meeting summaries
-  - Default model: llama3.2
-  - Endpoint: http://localhost:11434/api/generate
-  - Fallback to Ollama if API provider not configured
-  - Status check available via /api/tags endpoint
+**LLM/Summarization:**
+- Ollama (localhost:11434) - Local LLM inference for meeting summaries
+- OpenAI-compatible API - Fallback for cloud-based LLM (configurable endpoint)
+- SDK/Client: reqwest (Rust HTTP client)
+- Auth: api_key setting in database (for cloud providers)
 
-## System Integrations
-- **Audio Input/Output**: CPAL (Cross-Platform Audio Library)
-  - Microphone capture with configurable device selection
-  - Multiple sample formats supported: F32, I16, U16
-  - Default: 16kHz mono recording
+**Speech-to-Text:**
+- OpenAI Whisper - Local transcription via whisper-rs
+- Model download source: HuggingFace (ggerganov/whisper.cpp)
+- SDK/Client: whisper-rs 0.13 (Rust bindings to whisper.cpp)
 
-- **Virtual Audio Driver**: BlackHole
-  - System audio capture (optional, for recording system output)
-  - Device detection via `system_profiler` command
-  - Installation support via Homebrew or manual GitHub download
-  - HAL driver detection at `/Library/Audio/Plug-Ins/HAL`
+**System Integration:**
+- BlackHole2ch - Virtual audio driver for macOS system audio capture
+- Homebrew - Package manager for BlackHole installation
 
-- **Speech Recognition**: Whisper (via whisper-rs 0.13)
-  - Local on-device transcription
-  - Multiple model sizes:
-    - tiny (78MB), tiny-q5_1 (33MB)
-    - base (149MB), base-q5_1 (60MB)
-    - small (489MB), small-q5_1 (190MB)
-    - medium (1.6GB), medium-q5_0 (539MB)
-    - large-v3-turbo (1.6GB), large-v3-turbo-q5_0 (574MB)
-  - Models downloaded from Hugging Face: https://huggingface.co/ggerganov/whisper.cpp
-  - Default model size: small
-  - Max audio chunk: 30 seconds (480k samples @ 16kHz)
+## Data Storage
 
-- **macOS System Integration**:
-  - App data directory managed by Tauri
-  - System Profiler for audio device enumeration
-  - Terminal integration for Homebrew package installation
-  - Finder integration for opening model folders
+**Databases:**
+- SQLite (embedded)
+- Connection: Local file at app_data_dir/echo_note.db
+- Client: SQLx with runtime-tokio and sqlite features
+- Migrations: SQLx migrate! macro (src-tauri/migrations/)
 
-- **File Format Support**:
-  - WAV audio files (via hound crate)
-  - 16-bit PCM format for recordings
-  - Configurable sample rate and channel count
+**File Storage:**
+- Local filesystem only
+- Locations:
+  - Models: ~/Library/Application Support/echo-note/models/
+  - Recordings: ~/Library/Application Support/echo-note/recordings/
+  - Database: ~/Library/Application Support/echo-note/echo_note.db
 
-## Configuration Settings Storage
-- Settings stored in SQLite `settings` table
-- Configurable keys:
-  - `audio_device` (default: "default")
-  - `whisper_model_size` (default: "small")
-  - `llm_provider` (default: "ollama", alternatives: "api")
-  - `api_key` (OpenAI-compatible API key)
-  - `api_endpoint` (default: https://api.openai.com/v1)
+**Caching:**
+- None (whisper models cached locally after download)
+
+## Authentication & Identity
+
+**Auth Provider:**
+- None - Local desktop application
+- No user accounts or authentication required
+
+## Monitoring & Observability
+
+**Error Tracking:**
+- None - Logs to console/file only
+- Uses `log` crate for structured logging
+
+**Logs:**
+- Rust `log` crate for backend logging
+- Tauri event system for frontend-backend communication
+
+## CI/CD & Deployment
+
+**Hosting:**
+- Local desktop application (not hosted)
+- Distribution via Tauri bundler (macOS .app, Windows .exe, Linux AppImage)
+
+**CI Pipeline:**
+- None configured
+- Local quality gates via Just commands:
+  - `just check` - TypeScript + Rust type checking
+  - `just lint` - Biome + Clippy
+  - `just fmt` - Formatting
+  - `just test-rs` - Rust unit tests
+
+## Environment Configuration
+
+**Required env vars:**
+- None - pure desktop app with SQLite-based settings
+
+**Settings stored in database:**
+- audio_device - Selected microphone device ID
+- whisper_model_size - Whisper model size (tiny/small/medium/large)
+- llm_provider - "ollama" or "api"
+- api_key - API key for cloud LLM providers
+- api_endpoint - Custom API endpoint URL
+
+**Secrets location:**
+- SQLite database (app_data_dir/echo_note.db)
+- Settings table with key-value storage
+- No encryption at rest configured
+
+## Webhooks & Callbacks
+
+**Incoming:**
+- None
+
+**Outgoing:**
+- None - all integrations are pull-based
+
+## Hardware Integration
+
+**Audio Capture:**
+- cpal library for microphone input
+- BlackHole virtual driver for system audio (macOS only)
+- Dual-channel mixing (mic + system audio when BlackHole available)
+
+**Audio Processing:**
+- hound for WAV file I/O
+- Linear interpolation resampling (16kHz target)
+- Mono channel mixing for multi-channel sources

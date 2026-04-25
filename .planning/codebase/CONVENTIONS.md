@@ -1,86 +1,210 @@
-# Code Conventions
+# Coding Conventions
 
-## TypeScript / React
+**Analysis Date:** 2026-04-25
 
-### Naming
-- Components: `PascalCase` named exports (e.g., `RecordView`, `SettingsView`)
-- Hooks: `camelCase` starting with `use` (e.g., `useRecording`)
-- Files: Match primary export name (component = `PascalCase.tsx`, utilities = `camelCase.ts`)
+## Naming Patterns
 
-### Imports
-- Order: Tauri APIs → React hooks → local components → relative siblings
-- Example:
-  ```ts
-  import { invoke } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
-  import { useState, useEffect, useCallback } from "react";
-  import RecordView from "./components/RecordView";
-  ```
+**Files:**
+- React components: PascalCase (e.g., `RecordView.tsx`, `ErrorBoundary.tsx`)
+- React components have default export at end: `export default ComponentName;`
+- Rust modules: snake_case (e.g., `audio/mod.rs`, `commands/meetings.rs`)
+- Rust command files named after domain (e.g., `meetings.rs`, `transcription.rs`)
 
-### Types
-- Interfaces defined at the top of each file for props and API responses
-- `ApiResponse<T>` generic used for all Tauri command return values
-- `strict: true` in tsconfig — no implicit any, unused locals/params are errors
+**Functions:**
+- TypeScript: camelCase for regular functions, PascalCase for React components
+- Rust: snake_case for functions (e.g., `create_meeting_command`, `get_models_dir`)
+- Tauri commands use `_command` suffix (e.g., `start_recording_command`)
 
-### Formatting (Biome)
-- Tab indentation
-- 100 character line width
-- Double quotes for strings
-- Semicolons always
+**Variables:**
+- TypeScript: camelCase (e.g., `audioDevice`, `isLoading`)
+- Rust: snake_case (e.g., `audio_data`, `sample_rate`)
+- Constants: UPPER_SNAKE_CASE (e.g., `DEFAULT_OLLAMA_URL`, `SETTING_AUDIO_DEVICE`)
+- React refs use `Ref` suffix (e.g., `unlistenRef`, `recordingIntervalRef`)
 
-### Error Handling
-- Frontend uses try/catch with typed error messages
-- User-facing errors shown as toast notifications or inline messages
-- Tauri `invoke()` calls wrapped in try/catch blocks
+**Types:**
+- TypeScript interfaces: PascalCase with descriptive names (e.g., `ApiResponse<T>`, `MeetingResponse`)
+- TypeScript types for props: `{ComponentName}Props` (e.g., `RecordViewProps`)
+- Type aliases for state unions: PascalCase (e.g., `RecordingState`, `ProcessingStage`)
+- Rust structs: PascalCase (e.g., `AppStateExt`, `RecordingResult`)
+- Rust traits: PascalCase with descriptive names
 
-## Rust
+## Code Style
 
-### Naming
-- Functions and variables: `snake_case`
-- Types, structs, enums, traits: `PascalCase`
-- Constants: `SCREAMING_SNAKE_CASE`
-- Modules: `snake_case` (directory-based with `mod.rs`)
+**Formatting:**
+- Tool: Biome (v2.4.10)
+- Indent: Tab (not spaces)
+- Line width: 100 characters
+- Quotes: Double quotes for JavaScript/TypeScript
+- Semicolons: Always required
+- Trailing commas: All (e.g., `[1, 2, 3,]`)
 
-### Error Handling
-- `anyhow::Result<T>` with `.context("descriptive message")` for propagation
-- Tauri commands return `Result<ApiResponse<T>, String>` — never panic across FFI boundary
-- Use `?` operator for propagation; convert to string at command boundary
-- Logging before returning errors: `log::warn!()`, `log::info!()`, `log::debug!()`
+**Linting:**
+- TypeScript: Biome with recommended rules
+- Key rule: `noUnusedVariables` set to "error"
+- TypeScript strict mode enabled (`strict: true`)
+- `noUnusedLocals`, `noUnusedParameters`, `noFallthroughCasesInSwitch` enabled
+- Rust: Clippy with `-D warnings` (deny all warnings)
+- Rust formatting: `cargo fmt` with standard settings
 
-### Tauri Command Pattern
+## Import Organization
+
+**Order:**
+1. Third-party libraries (e.g., `react`, `@tauri-apps/api/core`)
+2. Tauri plugins and API
+3. Relative imports (e.g., `./components/ErrorBoundary`)
+4. CSS imports (always last)
+
+**Path Aliases:**
+- No path aliases configured; use relative imports
+- Internal crate modules use `crate::` prefix in Rust (e.g., `use crate::{ApiResponse, AppStateExt};`)
+- Local module imports use `super::*` in test modules
+
+**Import Patterns:**
+- TypeScript: Named imports preferred: `import { useState, useEffect } from "react";`
+- Type imports use `type` keyword: `import type { UnlistenFn } from "@tauri-apps/api/event";`
+- Rust imports grouped by crate then module: `use crate::{audio, db, system_audio};`
+
+## Error Handling
+
+**Patterns:**
+- **Tauri Commands:** Return `Result<ApiResponse<T>, String>` where `ApiResponse` wraps success/data/error
+- Rust backend uses `anyhow::Result` for internal functions with `.context()` for error messages
+- Map errors to user-friendly strings before returning to frontend
+- Use `map_err()` to convert error types with descriptive messages
+
 ```rust
-#[tauri::command]
-async fn my_command(
-    state: State<'_, AppStateExt>,
-    param: String,
-) -> Result<ApiResponse<MyType>, String> {
-    let result = do_work(&param)
-        .map_err(|e| format!("Failed to do work: {}", e))?;
-    Ok(ApiResponse::success(result))
+// Pattern from codebase
+pub async fn get_meeting_command(...) -> Result<ApiResponse<MeetingResponse>, String> {
+    let meeting = get_meeting(&state.db, id).await.map_err(|e| {
+        log::error!("Database error fetching meeting {}: {}", id, e);
+        format!("Database error: {}", e)
+    })?;
+    // ...
 }
 ```
 
-### Response Wrapper
-- `ApiResponse<T>` struct with `success(data)` and `error(message)` constructors
-- All Tauri commands use this wrapper for consistent frontend handling
+- TypeScript frontend uses try/catch with `instanceof Error` checks
+- Error state stored as `string | null` in component state
 
-### Module Organization
-- Each subsystem in its own directory: `audio/`, `db/`, `llm/`, `whisper/`, `system_audio/`
-- All Tauri command handlers centralized in `lib.rs`
-- Derived traits on public structs: `#[derive(Debug, Serialize, Deserialize)]`
+```typescript
+try {
+    // ...
+} catch (err) {
+    setError(err instanceof Error ? err.message : "Failed to load meetings");
+}
+```
 
-## Shared Patterns
+## Logging
 
-### IPC (Frontend ↔ Backend)
-- Frontend: `invoke("command_name", { param })` from `@tauri-apps/api/core`
-- Backend: `#[tauri::command]` async functions in `lib.rs`
-- Events: `listen("event-name", handler)` for streaming/progress updates
+**Framework:** `log` crate in Rust, `console.*` in TypeScript
 
-### Data Types
-- Request structs: `Deserialize` on Rust side
-- Response structs: `Serialize` on Rust side + matching TypeScript interfaces on frontend
-- Dates: ISO 8601 strings (`chrono::DateTime` serialized as strings)
+**Patterns:**
+- Rust: Use `log::info!`, `log::warn!`, `log::error!` macros
+- Include contextual data in log messages (IDs, operation names)
+- Log entry and exit of major operations with timing
 
-### Logging
-- Rust: `log::info!()`, `log::warn!()`, `log::debug!()` with contextual messages
-- Frontend: `console.log/error` for dev debugging
+```rust
+log::info!("Generating summary using Ollama at {} with model {}", ollama_url, model);
+log::error!("Mic recording error: {}", e);
+```
+
+- TypeScript: Use `console.log` for debug, include section labels for boundaries
+
+```typescript
+console.log("Meeting created:", meetingId);
+```
+
+## Comments
+
+**When to Comment:**
+- Document WHY, not WHAT (code should be self-documenting)
+- Document complex algorithms or business rules
+- Mark workarounds or intentional deviations
+- Use `#[allow(dead_code)]` for intentionally unused items in Rust
+
+**JSDoc/TSDoc:**
+- Use JSDoc for React components explaining purpose and props
+- Use TSDoc for helper functions explaining parameters and return values
+
+```typescript
+/**
+ * Catches render errors in a subtree and shows a fallback UI instead of
+ * crashing the entire app. Wrap each major view with this component.
+ */
+export class ErrorBoundary extends Component<Props, State> {
+```
+
+- Rust: Use `///` doc comments for public items
+
+```rust
+/// Extended app state that includes audio recording
+pub struct AppStateExt {
+    pub db: sqlx::Pool<sqlx::Sqlite>,
+    pub audio_recorder: Mutex<AudioRecorder>,
+}
+```
+
+## Function Design
+
+**Size:** Functions should do one thing; extract helper functions for complex logic
+
+**Parameters:**
+- Use destructured props objects for React components
+- Rust functions taking multiple related parameters use structs (e.g., `CreateMeetingInput`)
+- Prefer slice references over owned collections for flexibility
+
+**Return Values:**
+- Rust: Return `Result<T, E>` for fallible operations
+- Use custom response wrappers for API consistency (`ApiResponse<T>`)
+- TypeScript: Return unions for state (e.g., `type RecordingState = "idle" | "recording" | ...`)
+
+## Module Design
+
+**Exports:**
+- React components: Named export (`export function`) + default export (`export default`)
+- Rust modules: Public items marked with `pub`, organized in `mod.rs` files
+- Commands organized by domain in `commands/` subdirectory
+
+**Barrel Files:**
+- Rust: `commands/mod.rs` re-exports all command modules
+- No barrel files for TypeScript; import components directly
+
+```rust
+// commands/mod.rs
+pub mod audio;
+pub mod llm;
+pub mod meetings;
+pub mod settings;
+pub mod summaries;
+pub mod transcription;
+pub mod transcripts;
+```
+
+## Architecture Patterns
+
+**Tauri State Pattern:**
+- Single `AppStateExt` struct holds all shared state
+- Database pool and audio recorder in Mutex for thread safety
+- State passed via `tauri::State<'_, AppStateExt>` in commands
+
+**Audio Thread Pattern:**
+- `cpal::Stream` is not `Send`/`Sync` — use dedicated audio thread
+- Message passing via `std::sync::mpsc` channels for control
+- Never store stream in Tauri state
+
+**API Response Pattern:**
+- Consistent wrapper struct for all Tauri command responses
+
+```rust
+#[derive(Serialize)]
+pub struct ApiResponse<T> {
+    pub success: bool,
+    pub data: Option<T>,
+    pub error: Option<String>,
+}
+```
+
+**Frontend State Pattern:**
+- Loading/error/data pattern for async data fetching
+- Refs for cleanup functions (unlisten, intervals)
+- `useCallback` for functions passed to child components or effects

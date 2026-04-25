@@ -1,92 +1,192 @@
-# Testing
+# Testing Patterns
 
-## Framework
+**Analysis Date:** 2026-04-25
 
-### Frontend
-- **No automated test framework installed** — no jest, vitest, or testing-library in `package.json`
-- TypeScript type checking (`bun run typecheck`) serves as static correctness validation
-- Biome (`bun run lint`) enforces code quality rules
+## Test Framework
 
-### Backend (Rust)
-- Built-in Rust test framework (`#[test]`, `#[cfg(test)]`)
-- Run with: `cargo test` (from `src-tauri/` directory or root)
+**Runner:**
+- Rust: Built-in `cargo test` (no external test runner)
+- TypeScript: No test framework installed (no tests present for frontend)
+- Config: Tests embedded in source files under `#[cfg(test)]` modules
 
-## Structure
+**Assertion Library:**
+- Rust: Standard library assertions (`assert!`, `assert_eq!`, `assert!().is_err()`)
 
-### Test Location
-- Rust unit tests co-located in source files within `#[cfg(test)] mod tests { }` blocks
-- No dedicated test directories
-- No integration test directory (`tests/`) found
+**Run Commands:**
+```bash
+just test-rs              # Run all Rust tests
+cargo test --manifest-path src-tauri/Cargo.toml  # Direct cargo command
+```
 
-### Test File Naming
-- Rust: inline in `mod.rs` files — no separate test files
+## Test File Organization
 
-## Frontend Testing
-- **Currently: No automated tests**
-- Manual testing via `cargo tauri dev` + app interaction
-- TypeScript strict mode catches type-level errors at compile time
+**Location:**
+- Rust: Tests are co-located in source files under `#[cfg(test)] mod tests`
+- No separate `tests/` directory for integration tests
+- Files with tests: `whisper/mod.rs`, `llm/mod.rs`, `system_audio/mod.rs`
 
-## Backend Testing
+**Naming:**
+- Test functions: `test_{descriptive_name}` (e.g., `test_get_model_filename`, `test_parse_summary_response`)
 
-### Pattern
+**Structure:**
+```
+src-tauri/src/
+├── whisper/mod.rs       # Contains #[cfg(test)] mod tests
+├── llm/mod.rs          # Contains #[cfg(test)] mod tests
+├── system_audio/mod.rs # Contains #[cfg(test)] mod tests
+└── ... (other modules have no tests)
+```
+
+## Test Structure
+
+**Suite Organization:**
 ```rust
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_something() {
-        // Arrange, Act, Assert
+    fn test_get_model_filename() {
+        assert_eq!(get_model_filename("tiny").unwrap(), "ggml-tiny.bin");
+        assert_eq!(get_model_filename("small").unwrap(), "ggml-small.bin");
+        assert!(get_model_filename("invalid").is_err());
+    }
+
+    #[test]
+    fn test_default_model() {
+        assert_eq!(DEFAULT_MODEL_SIZE, "small");
     }
 }
 ```
 
-### Tests Found
-- `whisper/mod.rs`:
-  - `test_get_model_filename()` — validates model filename generation
-  - `test_default_model()` — validates default model selection
-  - `test_resample_audio()` — validates audio resampling logic
-- `llm/mod.rs`:
-  - `test_build_summary_prompt()` — validates prompt construction
-  - `test_parse_summary_response()` — validates LLM response parsing
-- `system_audio/mod.rs`:
-  - `test_extract_json_string_value()` — validates JSON extraction utility
+**Patterns:**
+- No setup/teardown functions; tests are self-contained
+- Each test verifies one concept with multiple assertions
+- Use `unwrap()` for expected success cases, `is_err()` for expected failures
+- Tests use real implementations (not mocked)
 
-### Focus
-Unit tests for pure utility functions (parsing, validation, audio math). No database, command, or integration tests exist.
+## Mocking
+
+**Framework:** None (no mocking library used)
+
+**Patterns:**
+- Tests call actual functions with test inputs
+- No external dependencies mocked in existing tests
+- Functions under test are pure or have minimal side effects
+
+**Example from codebase:**
+```rust
+#[test]
+fn test_resample_audio() {
+    let input = vec![0.0, 0.5, 1.0, 0.5, 0.0];
+    let output = resample_audio(&input, 16000, 8000);
+    assert_eq!(output.len(), 3); // Approximately half the size
+}
+```
+
+**What to Mock:**
+- Not applicable (no mocking pattern established)
+
+**What NOT to Mock:**
+- Current tests exercise actual logic without mocks
+- Database calls would need mocking if tested
+- External API calls (Ollama, Whisper downloads) not unit tested
+
+## Fixtures and Factories
+
+**Test Data:**
+- Hardcoded test data in test functions
+- No shared fixtures or factory functions
+
+```rust
+#[test]
+fn test_parse_summary_response() {
+    let response = r#"KEY POINTS:
+- Discussed project timeline
+- Reviewed budget
+
+DECISIONS:
+- Approved Q1 plan
+
+ACTION ITEMS:
+- Alice: Prepare report
+- Bob: Schedule follow-up"#;
+
+    let summary = parse_summary_response(response);
+    assert!(summary.key_points.contains("Discussed project timeline"));
+    // ...
+}
+```
+
+**Location:**
+- Test data defined inline within each test function
+- No external fixture files or test data directories
 
 ## Coverage
 
-### What Is Tested
-- Whisper model name/filename utilities
-- Audio resampling math
-- LLM prompt building
-- LLM response parsing
-- JSON string extraction
+**Requirements:** None enforced
 
-### Gaps
-- No database layer tests
-- No Tauri command-level tests
-- No audio recording/playback tests
-- No frontend component tests
-- No end-to-end (E2E) tests
-- No error path testing
-- ~50 lines of tests across ~3,317 lines of Rust code (~1.5% coverage)
-
-## Running Tests
+**View Coverage:**
 ```bash
-# Rust unit tests
-cargo test                        # all tests
-cargo test <test_name>            # specific test
-
-# TypeScript validation
-bun run typecheck                 # tsc type check
-
-# Linting
-bun run lint                      # Biome check
-cargo clippy                      # Rust lints
-cargo fmt --check                 # Rust format check
-
-# All checks at once
-just check                        # runs all above
+# Not configured - no coverage tooling installed
+# Could add with cargo-tarpaulin or similar
 ```
+
+## Test Types
+
+**Unit Tests:**
+- Scope: Pure functions and simple logic
+- Approach: Test input/output relationships
+- Present in: `whisper/mod.rs` (3 tests), `llm/mod.rs` (6 tests), `system_audio/mod.rs` (1 test)
+
+**Integration Tests:**
+- Scope: Not currently implemented
+- Database operations tested manually or via application
+- No automated integration test suite
+
+**E2E Tests:**
+- Not used
+- Application tested manually through UI
+
+## Common Patterns
+
+**Async Testing:**
+- Not present in current test suite
+- Async functions tested via application, not unit tests
+- Would use `tokio::test` attribute for async tests
+
+**Error Testing:**
+```rust
+#[test]
+fn test_get_model_filename() {
+    // Success case
+    assert_eq!(get_model_filename("tiny").unwrap(), "ggml-tiny.bin");
+    // Error case
+    assert!(get_model_filename("invalid").is_err());
+}
+```
+
+**String Parsing Tests:**
+```rust
+#[test]
+fn test_extract_section() {
+    let text = "KEY POINTS:\n- point 1\n\nDECISIONS:\n- decision 1";
+    let section = extract_section(text, "KEY POINTS:", Some("DECISIONS:"));
+    assert_eq!(section.unwrap().trim(), "- point 1");
+}
+```
+
+## Test Gaps
+
+**Areas Without Tests:**
+- Frontend TypeScript/React code (no test framework installed)
+- Database operations (CRUD in `db/mod.rs`)
+- Audio recording functionality (`audio/mod.rs`)
+- Tauri commands (`commands/*.rs`)
+- API integration (Ollama, Whisper downloads)
+- Error handling paths
+
+**Testing Debt:**
+- No continuous integration configured for automated testing
+- No coverage reporting
+- Manual testing through application UI

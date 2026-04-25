@@ -1,49 +1,84 @@
-# Tech Stack
+# Technology Stack
 
-## Languages & Runtimes
-- Rust (2021 edition) - backend/Tauri core
-- TypeScript 5.8.3 - frontend
-- JavaScript/ES2020 - frontend runtime
+**Analysis Date:** 2026-04-25
 
-## Frameworks & Libraries (Frontend)
-- React 19.1.0
-- @tauri-apps/api 2.x - Tauri integration
-- @tauri-apps/plugin-opener 2.x - URL opening
+## Languages
 
-## Frameworks & Libraries (Backend/Rust)
-- tauri 2 - desktop framework
-- tauri-build 2 - build tooling
-- tauri-plugin-opener 2 - external link handler
-- sqlx 0.8 - async SQL toolkit with SQLite support
-- tokio 1.x (full features) - async runtime
-- serde 1 - serialization/deserialization
-- serde_json 1 - JSON handling
-- chrono 0.4 - datetime handling
-- anyhow 1 - error handling
-- reqwest 0.12 - HTTP client with streaming
-- futures-util 0.3 - async utilities
-- whisper-rs 0.13 - speech-to-text via Whisper
-- cpal 0.15 - audio capture/playback
+**Primary:**
+- TypeScript ~5.8.3 - React frontend (src/)
+- Rust Edition 2021 - Tauri backend (src-tauri/src/)
+
+**Secondary:**
+- SQL - Database migrations (src-tauri/migrations/)
+
+## Runtime
+
+**Environment:**
+- Tauri v2 - Desktop application framework
+- Node.js/Bun - Frontend tooling and package management
+
+**Package Manager:**
+- Bun (JavaScript/TypeScript dependencies)
+- Cargo (Rust dependencies)
+- Lockfile: bun.lock (present), Cargo.lock (present)
+
+## Frameworks
+
+**Core:**
+- React ^19.1.0 - UI component library
+- Tauri v2 - Cross-platform desktop app runtime (Rust backend + Web frontend)
+- SQLx 0.8 - Async SQL toolkit with compile-time checked queries
+- Tokio 1.x - Async runtime for Rust
+
+**Testing:**
+- Built-in Rust test framework (`cargo test`)
+- No dedicated JS test framework configured
+
+**Build/Dev:**
+- Vite ^7.0.4 - Frontend build tool and dev server
+- Tauri CLI ^2 - App building and packaging
+- Biome ^2.4.10 - Linting and formatting (TypeScript/JSON)
+
+## Key Dependencies
+
+**Critical:**
+- whisper-rs 0.13 - OpenAI Whisper transcription (Rust bindings)
+- cpal 0.15 - Cross-platform audio capture library
+- sqlx 0.8 - SQLite database with compile-time query validation
+- reqwest 0.12 - HTTP client for API calls (Ollama, HuggingFace)
 - hound 3.5 - WAV file reading/writing
-- log 0.4 - logging framework
 
-## Build & Tooling
-- Vite 7.0.4 - frontend bundler
-- Tauri CLI 2 - desktop app build and dev
-- TypeScript compiler (tsc) - type checking
-- Biome 2.4.10 - linting and formatting
-- Bun - package manager (configured in tauri.conf.json)
-- Cargo - Rust package manager
+**Infrastructure:**
+- serde + serde_json - Serialization
+- chrono 0.4 - Date/time handling
+- anyhow 1.x - Error handling
+- futures-util 0.3 - Async streaming (model downloads)
+- tauri-plugin-opener 2 - File/URL opening
 
-## Configuration Files
-- `src-tauri/tauri.conf.json` - Tauri app configuration (window, bundle, security)
-- `src-tauri/Cargo.toml` - Rust dependencies and build settings
-- `package.json` - Node.js dependencies and scripts
-- `vite.config.ts` - Frontend build configuration
-- `tsconfig.json` - TypeScript configuration
-- `tsconfig.node.json` - TypeScript config for Node.js context
-- `biome.json` - Biome linting/formatting rules
+## Configuration
 
-## Package Management
-- Bun (primary, specified in tauri.conf.json)
-- Cargo (Rust)
+**Environment:**
+- No .env files (desktop app, settings stored in SQLite)
+- Settings table in database for user configuration
+- Default settings: audio_device, whisper_model_size, llm_provider, api_key, api_endpoint
+
+**Build:**
+- vite.config.ts - Vite configuration (port 1420, Tauri-specific settings)
+- tsconfig.json - TypeScript strict mode, ES2020 target
+- tsconfig.node.json - Node-specific TS config (referenced)
+- biome.json - Linting/formatting rules (tabs, double quotes, trailing commas)
+- tauri.conf.json - App metadata, window config, security CSP, bundle settings
+
+## Platform Requirements
+
+**Development:**
+- macOS (system_audio module uses macOS-specific APIs)
+- Bun package manager
+- Rust toolchain (cargo, clippy, fmt)
+- Xcode Command Line Tools (for BlackHole detection)
+- Just (optional) - Task runner for quality gates
+
+**Production:**
+- macOS app bundle (.app)
+- Targets: all platforms (configured in tauri.conf.json)
+- Bundle includes: icons, native binaries, embedded frontend
