@@ -1,5 +1,6 @@
 import { useState } from "react";
 import "./App.css";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { HistoryView } from "./components/HistoryView";
 import { MeetingDetailView } from "./components/MeetingDetailView";
 import { RecordView } from "./components/RecordView";
@@ -15,32 +16,36 @@ function App() {
 		switch (currentView) {
 			case "record":
 				return (
-					<RecordView
-						onMeetingCreated={(meetingId) => {
-							// Navigate to meeting detail view after recording/processing completes
-							console.log("Meeting created:", meetingId);
-							setSelectedMeetingId(meetingId);
-							setCurrentView("meeting-detail");
-						}}
-						onNavigateToSettings={() => setCurrentView("settings")}
-					/>
+					<ErrorBoundary section="Record">
+						<RecordView
+							onMeetingCreated={(meetingId) => {
+								// Navigate to meeting detail view after recording/processing completes
+								console.log("Meeting created:", meetingId);
+								setSelectedMeetingId(meetingId);
+								setCurrentView("meeting-detail");
+							}}
+							onNavigateToSettings={() => setCurrentView("settings")}
+						/>
+					</ErrorBoundary>
 				);
 			case "history":
 				return (
-					<HistoryView
-						onMeetingClick={(meetingId) => {
-							console.log("Meeting clicked:", meetingId);
-							setSelectedMeetingId(meetingId);
-							setCurrentView("meeting-detail");
-						}}
-						onDeleteMeeting={(meetingId) => {
-							console.log("Meeting deleted:", meetingId);
-							// If we're viewing the deleted meeting, go back to history
-							if (selectedMeetingId === meetingId) {
-								setSelectedMeetingId(null);
-							}
-						}}
-					/>
+					<ErrorBoundary section="History">
+						<HistoryView
+							onMeetingClick={(meetingId) => {
+								console.log("Meeting clicked:", meetingId);
+								setSelectedMeetingId(meetingId);
+								setCurrentView("meeting-detail");
+							}}
+							onDeleteMeeting={(meetingId) => {
+								console.log("Meeting deleted:", meetingId);
+								// If we're viewing the deleted meeting, go back to history
+								if (selectedMeetingId === meetingId) {
+									setSelectedMeetingId(null);
+								}
+							}}
+						/>
+					</ErrorBoundary>
 				);
 			case "meeting-detail":
 				if (selectedMeetingId === null) {
@@ -48,16 +53,22 @@ function App() {
 					return null;
 				}
 				return (
-					<MeetingDetailView
-						meetingId={selectedMeetingId}
-						onBack={() => {
-							setSelectedMeetingId(null);
-							setCurrentView("history");
-						}}
-					/>
+					<ErrorBoundary section="Meeting Detail">
+						<MeetingDetailView
+							meetingId={selectedMeetingId}
+							onBack={() => {
+								setSelectedMeetingId(null);
+								setCurrentView("history");
+							}}
+						/>
+					</ErrorBoundary>
 				);
 			case "settings":
-				return <SettingsView />;
+				return (
+					<ErrorBoundary section="Settings">
+						<SettingsView />
+					</ErrorBoundary>
+				);
 			default:
 				return null;
 		}

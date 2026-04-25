@@ -105,7 +105,7 @@ export function MeetingDetailView({ meetingId, onBack }: MeetingDetailViewProps)
 			// Fetch transcript
 			const transcriptResponse = await invoke<ApiResponse<Transcript | null>>(
 				"get_transcript_by_meeting_command",
-				{ meeting_id: meetingId },
+				{ meetingId },
 			);
 			if (transcriptResponse.success) {
 				setTranscript(transcriptResponse.data);
@@ -114,7 +114,7 @@ export function MeetingDetailView({ meetingId, onBack }: MeetingDetailViewProps)
 			// Fetch summary
 			const summaryResponse = await invoke<ApiResponse<Summary | null>>(
 				"get_summary_by_meeting_command",
-				{ meeting_id: meetingId },
+				{ meetingId },
 			);
 			if (summaryResponse.success) {
 				setSummary(summaryResponse.data);
