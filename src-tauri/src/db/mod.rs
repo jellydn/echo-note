@@ -102,74 +102,13 @@ pub async fn init_db(app_handle: &tauri::AppHandle) -> Result<Pool<Sqlite>> {
         .connect_with(connect_options)
         .await?;
 
-    // Run migrations
-    run_migrations(&pool).await?;
+    // Run migrations from src-tauri/migrations/
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .context("Failed to run database migrations")?;
 
     Ok(pool)
-}
-
-/// Run database migrations
-async fn run_migrations(pool: &Pool<Sqlite>) -> Result<()> {
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS meetings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            date DATETIME NOT NULL,
-            duration_seconds INTEGER NOT NULL,
-            audio_path TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-        "#,
-    )
-    .execute(pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS transcripts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            meeting_id INTEGER NOT NULL,
-            content TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
-        )
-        "#,
-    )
-    .execute(pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS summaries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            meeting_id INTEGER NOT NULL,
-            key_points TEXT NOT NULL,
-            decisions TEXT NOT NULL,
-            action_items TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
-        )
-        "#,
-    )
-    .execute(pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS settings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            key TEXT NOT NULL UNIQUE,
-            value TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-        "#,
-    )
-    .execute(pool)
-    .await?;
-
-    Ok(())
 }
 
 /// Create a new meeting record
