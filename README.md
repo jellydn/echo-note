@@ -2,7 +2,7 @@
 
 A privacy-first native desktop app that listens to your meetings, transcribes locally, and generates structured summaries — all without data leaving your device.
 
-> Replace Otter.ai and Fireflies.ai with a fully offline, zero-cost alternative. No meeting bots. No cloud dependency.
+> No meeting bots. No cloud dependency.
 
 ## Features
 

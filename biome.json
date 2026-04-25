@@ -8,6 +8,7 @@
 			"!**/target",
 			"!**/.git",
 			"!**/.vscode",
+			"!**/.claude",
 			"!**/src-tauri/gen",
 			"!**/*.lock"
 		]
