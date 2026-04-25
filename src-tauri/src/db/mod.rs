@@ -80,6 +80,7 @@ pub const DEFAULT_WHISPER_MODEL_SIZE: &str = "small";
 pub const DEFAULT_LLM_PROVIDER: &str = "ollama";
 pub const DEFAULT_API_KEY: &str = "";
 pub const DEFAULT_API_ENDPOINT: &str = "https://api.openai.com/v1";
+pub const DEFAULT_API_MODEL: &str = "gpt-4o-mini";
 
 /// Initialize the database pool and create tables if they don't exist
 pub async fn init_db(app_handle: &tauri::AppHandle) -> Result<Pool<Sqlite>> {
@@ -458,6 +459,7 @@ pub async fn init_default_settings(pool: &Pool<Sqlite>) -> Result<()> {
         ("llm_provider", DEFAULT_LLM_PROVIDER),
         ("api_key", DEFAULT_API_KEY),
         ("api_endpoint", DEFAULT_API_ENDPOINT),
+        ("api_model", DEFAULT_API_MODEL),
     ];
 
     for (key, default_value) in &defaults {

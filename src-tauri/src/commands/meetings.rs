@@ -10,7 +10,8 @@ use crate::db;
 #[derive(Deserialize)]
 pub struct CreateMeetingRequest {
     pub title: String,
-    pub date: String, // ISO 8601 format
+    #[serde(with = "chrono::serde::ts_seconds")]
+    pub date: chrono::DateTime<chrono::Utc>,
     pub duration_seconds: i64,
     pub audio_path: String,
 }
@@ -43,13 +44,9 @@ pub async fn create_meeting_command(
     state: State<'_, AppStateExt>,
     request: CreateMeetingRequest,
 ) -> Result<ApiResponse<MeetingResponse>, String> {
-    let date = chrono::DateTime::parse_from_rfc3339(&request.date)
-        .map_err(|e| format!("Invalid date format: {}", e))?
-        .with_timezone(&chrono::Utc);
-
     let input = CreateMeetingInput {
         title: request.title,
-        date,
+        date: request.date,
         duration_seconds: request.duration_seconds,
         audio_path: request.audio_path,
     };

@@ -1,7 +1,8 @@
 use crate::db;
 use crate::{ApiResponse, AppStateExt};
 use db::{
-    create_summary, get_setting, CreateSummaryInput, DEFAULT_API_ENDPOINT, DEFAULT_LLM_PROVIDER,
+    create_summary, get_setting, CreateSummaryInput, DEFAULT_API_ENDPOINT, DEFAULT_API_MODEL,
+    DEFAULT_LLM_PROVIDER,
 };
 use llm::{
     check_ollama_status, generate_summary, generate_summary_api, DEFAULT_OLLAMA_URL,
@@ -9,8 +10,34 @@ use llm::{
 };
 use serde::Serialize;
 use tauri::State;
+use url::Url;
 
 use crate::llm;
+
+/// Normalize API endpoint URL to ensure it ends with /chat/completions
+fn normalize_api_endpoint(endpoint: &str) -> anyhow::Result<Url> {
+    let mut url = Url::parse(endpoint)?;
+
+    // Check if path already ends with chat/completions
+    if url.path().ends_with("/chat/completions") {
+        return Ok(url);
+    }
+
+    // Handle base URL patterns
+    let path = url.path();
+    let new_path = if path.ends_with("/v1") {
+        format!("{}/chat/completions", path)
+    } else if path.ends_with("/") {
+        format!("{}chat/completions", path)
+    } else if path == "/" || path.is_empty() {
+        "/v1/chat/completions".to_string()
+    } else {
+        format!("{}/chat/completions", path)
+    };
+
+    url.set_path(&new_path);
+    Ok(url)
+}
 
 #[derive(Serialize, Clone)]
 pub struct GenerateSummaryResponse {
@@ -62,20 +89,15 @@ pub async fn generate_summary_command(
             return Err("API key is required when using API provider".to_string());
         }
 
-        // Construct full API URL — handles both base URLs and already-complete URLs
-        let api_url = if api_endpoint.ends_with("/chat/completions") {
-            api_endpoint
-        } else if api_endpoint.ends_with("/v1") {
-            format!("{}/chat/completions", api_endpoint)
-        } else if api_endpoint.ends_with('/') {
-            format!("{}chat/completions", api_endpoint)
-        } else {
-            format!("{}/chat/completions", api_endpoint)
-        };
+        // Parse and normalize API URL using url crate
+        let api_url = normalize_api_endpoint(&api_endpoint)
+            .map_err(|e| format!("Invalid API endpoint: {}", e))?;
 
-        let model = "gpt-4o-mini";
+        let model = get_setting(&state.db, "api_model", DEFAULT_API_MODEL)
+            .await
+            .map_err(|e| format!("Failed to get API model setting: {}", e))?;
 
-        generate_summary_api(&api_url, &api_key, model, &transcript)
+        generate_summary_api(api_url.as_str(), &api_key, &model, &transcript)
             .await
             .map_err(|e| format!("Failed to generate summary via API: {}", e))?
     } else {
