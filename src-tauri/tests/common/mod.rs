@@ -3,21 +3,11 @@ use sqlx::{Pool, Sqlite};
 use std::str::FromStr;
 
 /// Create a temporary test database pool with shared in-memory database
-/// Uses a thread-local static to ensure each test thread gets its own database
-/// while allowing multiple concurrent connections within that thread
+/// Uses a unique UUID for each test to ensure complete isolation
+/// while allowing multiple concurrent connections within that test
 pub async fn setup_test_db() -> Pool<Sqlite> {
-    use std::cell::RefCell;
-
-    thread_local! {
-        static DB_COUNTER: RefCell<u32> = const { RefCell::new(0) };
-    }
-
-    // Generate a unique name for this test's database (per-thread isolation)
-    let db_id = DB_COUNTER.with(|c| {
-        let mut counter = c.borrow_mut();
-        *counter += 1;
-        *counter
-    });
+    // Generate a unique database name using UUID for guaranteed uniqueness
+    let db_id = uuid::Uuid::new_v4();
 
     // Use shared cache in-memory database with unique name per test instance
     // This allows multiple connections to share the same database
