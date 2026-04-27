@@ -11,7 +11,8 @@ vi.mock("@tauri-apps/api/event", () => ({
 	emit: vi.fn(),
 }));
 
-// Reset all mocks before each test
+// Reset all mocks before each test to ensure clean state between tests
+// Errors during mock cleanup are intentionally ignored - Vitest handles these
 beforeEach(() => {
 	vi.clearAllMocks();
 });

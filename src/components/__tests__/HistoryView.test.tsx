@@ -99,8 +99,8 @@ describe("HistoryView", () => {
 			expect(screen.getByText("Team Standup")).toBeInTheDocument();
 		});
 
-		const meetingItem = screen.getByText("Team Standup").closest("[role='button']");
-		if (!meetingItem) throw new Error("Meeting item not found");
+		// Find the meeting item by role and name for resilience
+		const meetingItem = screen.getByRole("button", { name: /team standup/i });
 		await userEvent.click(meetingItem);
 
 		expect(onMeetingClick).toHaveBeenCalledWith(1);
