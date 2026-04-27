@@ -4,8 +4,7 @@ use db::{get_setting, set_setting, DEFAULT_AUDIO_DEVICE};
 use serde::Serialize;
 use system_audio::{
     auto_install_blackhole, get_blackhole_device_name, install_blackhole_driver,
-    install_blackhole_from_bundle, is_blackhole_installed, setup_blackhole_on_first_launch,
-    BlackHoleInstallMethod,
+    install_blackhole_from_bundle, is_blackhole_installed, BlackHoleInstallMethod,
 };
 use tauri::State;
 
@@ -170,7 +169,7 @@ pub struct BlackHoleInstallResponse {
 pub async fn install_blackhole_bundled_command(
     app_handle: tauri::AppHandle,
 ) -> Result<ApiResponse<BlackHoleInstallResponse>, String> {
-    let method = install_blackhole_from_bundle(&app_handle).map_err(|e| {
+    install_blackhole_from_bundle(&app_handle).map_err(|e| {
         format!(
             "Bundled installation failed: {}. Try Homebrew or manual installation instead.",
             e
@@ -183,7 +182,7 @@ pub async fn install_blackhole_bundled_command(
         message: "BlackHole installed successfully from bundled package".to_string(),
     };
 
-    log::info!("BlackHole installed via bundled package: {:?}", method);
+    log::info!("BlackHole installed via bundled package");
     Ok(ApiResponse::success(response))
 }
 

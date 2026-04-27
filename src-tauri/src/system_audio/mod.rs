@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::process::Command;
+use tauri::Manager;
 
 /// BlackHole virtual audio driver constants
 #[allow(dead_code)]
@@ -313,11 +314,13 @@ pub enum BlackHoleInstallMethod {
     Bundled,
     Homebrew,
     Manual,
+    #[allow(dead_code)]
     AlreadyInstalled,
 }
 
 /// Check and install BlackHole if needed on first launch
 /// Returns the installation method used or AlreadyInstalled if already present
+#[allow(dead_code)]
 pub fn setup_blackhole_on_first_launch(
     app_handle: &tauri::AppHandle,
 ) -> Result<BlackHoleInstallMethod> {
