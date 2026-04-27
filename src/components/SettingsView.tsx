@@ -68,6 +68,12 @@ const MEETING_APP_GUIDES = [
 		outputValue: "BlackHole 2ch or a Multi-Output Device that includes BlackHole",
 		inputSetting: "Settings > Devices > Microphone",
 	},
+	{
+		name: "Slack",
+		outputSetting: "Preferences > Audio & Video > Speaker",
+		outputValue: "BlackHole 2ch or a Multi-Output Device that includes BlackHole",
+		inputSetting: "Preferences > Audio & Video > Microphone",
+	},
 ];
 
 // Model size type - driven by backend model list
