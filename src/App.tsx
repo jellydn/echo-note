@@ -1,16 +1,57 @@
-import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useState } from "react";
 import "./App.css";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { HistoryView } from "./components/HistoryView";
 import { MeetingDetailView } from "./components/MeetingDetailView";
 import { RecordView } from "./components/RecordView";
 import { SettingsView } from "./components/SettingsView";
+import { SetupWizard } from "./components/SetupWizard";
 
 type View = "record" | "history" | "settings" | "meeting-detail";
 
 function App() {
 	const [currentView, setCurrentView] = useState<View>("record");
 	const [selectedMeetingId, setSelectedMeetingId] = useState<number | null>(null);
+	const [isFirstLaunch, setIsFirstLaunch] = useState<boolean | null>(null);
+	const [isCheckingFirstLaunch, setIsCheckingFirstLaunch] = useState(true);
+
+	// Check if this is the first launch
+	useEffect(() => {
+		const checkFirstLaunch = async () => {
+			try {
+				const response = await invoke<{ data: boolean }>("check_first_launch_status_command");
+				setIsFirstLaunch(response.data);
+			} catch (err) {
+				console.error("Failed to check first launch status:", err);
+				// Assume not first launch if check fails
+				setIsFirstLaunch(false);
+			} finally {
+				setIsCheckingFirstLaunch(false);
+			}
+		};
+
+		checkFirstLaunch();
+	}, []);
+
+	const handleSetupComplete = () => {
+		setIsFirstLaunch(false);
+	};
+
+	// Show loading state while checking first launch
+	if (isCheckingFirstLaunch) {
+		return (
+			<div className="app-loading">
+				<div className="loading-spinner" />
+				<p>Loading EchoNote...</p>
+			</div>
+		);
+	}
+
+	// Show setup wizard on first launch
+	if (isFirstLaunch) {
+		return <SetupWizard onComplete={handleSetupComplete} />;
+	}
 
 	const renderView = () => {
 		switch (currentView) {

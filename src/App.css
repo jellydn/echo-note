@@ -2037,6 +2037,52 @@ body,
 	cursor: not-allowed;
 }
 
+.meeting-app-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 12px;
+	margin-top: 4px;
+}
+
+.meeting-app-card {
+	padding: 16px;
+	border: 1px solid #e0e0e0;
+	border-radius: 10px;
+	background-color: #fafafa;
+}
+
+.meeting-app-name {
+	font-weight: 600;
+	color: #1a1a2e;
+	margin-bottom: 12px;
+}
+
+.meeting-app-steps {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	margin: 0;
+}
+
+.meeting-app-steps dt {
+	font-size: 0.78rem;
+	font-weight: 600;
+	color: #666;
+	margin-bottom: 2px;
+}
+
+.meeting-app-steps dd {
+	font-size: 0.88rem;
+	color: #333;
+	margin: 0;
+}
+
+@media (max-width: 720px) {
+	.meeting-app-grid {
+		grid-template-columns: 1fr;
+	}
+}
+
 /* Dark mode support for BlackHole */
 @media (prefers-color-scheme: dark) {
 	.blackhole-installed {
@@ -2061,6 +2107,23 @@ body,
 
 	.blackhole-install-button:disabled {
 		background-color: #4a4a5a;
+	}
+
+	.meeting-app-card {
+		background-color: #2f2f3f;
+		border-color: #4a4a5a;
+	}
+
+	.meeting-app-name {
+		color: #f6f6f6;
+	}
+
+	.meeting-app-steps dt {
+		color: #aaa;
+	}
+
+	.meeting-app-steps dd {
+		color: #ddd;
 	}
 }
 
@@ -2239,5 +2302,393 @@ body,
 
 	.blackhole-install-button:disabled {
 		background-color: #4a4a5a;
+	}
+}
+
+/* ==================== SETUP WIZARD STYLES ==================== */
+
+.app-loading {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	height: 100vh;
+	width: 100vw;
+	background-color: #f6f6f6;
+	gap: 16px;
+}
+
+.loading-spinner {
+	width: 40px;
+	height: 40px;
+	border: 3px solid #e0e0e0;
+	border-top-color: #646cff;
+	border-radius: 50%;
+	animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.setup-wizard-overlay {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background-color: rgba(0, 0, 0, 0.5);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 1000;
+}
+
+.setup-wizard {
+	background-color: #ffffff;
+	border-radius: 16px;
+	padding: 40px;
+	max-width: 600px;
+	width: 90%;
+	max-height: 90vh;
+	overflow-y: auto;
+	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.setup-progress {
+	display: flex;
+	gap: 8px;
+	margin-bottom: 32px;
+}
+
+.progress-step {
+	flex: 1;
+	height: 4px;
+	background-color: #e0e0e0;
+	border-radius: 2px;
+	transition: background-color 0.3s ease;
+}
+
+.progress-step.active {
+	background-color: #646cff;
+}
+
+.progress-step.completed {
+	background-color: #4caf50;
+}
+
+.setup-step {
+	text-align: center;
+}
+
+.setup-icon {
+	font-size: 48px;
+	margin-bottom: 16px;
+}
+
+.setup-icon.success {
+	color: #4caf50;
+}
+
+.setup-step h2 {
+	font-size: 1.75rem;
+	font-weight: 600;
+	color: #1a1a2e;
+	margin-bottom: 16px;
+}
+
+.setup-description {
+	font-size: 1rem;
+	color: #666;
+	line-height: 1.6;
+	margin-bottom: 24px;
+}
+
+.setup-features {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	margin-bottom: 32px;
+	padding: 20px;
+	background-color: #f8f9fa;
+	border-radius: 12px;
+}
+
+.feature-item {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	font-size: 0.95rem;
+	color: #444;
+}
+
+.feature-icon {
+	font-size: 1.25rem;
+}
+
+.setup-info-box {
+	background-color: #f0f4ff;
+	border: 1px solid #d0d8ff;
+	border-radius: 8px;
+	padding: 16px;
+	margin-bottom: 24px;
+	text-align: left;
+}
+
+.setup-info-box.warning {
+	background-color: #fff8e6;
+	border-color: #ffd699;
+}
+
+.setup-info-box h4 {
+	font-size: 0.9rem;
+	font-weight: 600;
+	color: #444;
+	margin-bottom: 8px;
+}
+
+.setup-info-box p {
+	font-size: 0.9rem;
+	color: #666;
+	margin-bottom: 8px;
+}
+
+.setup-info-box code {
+	display: block;
+	background-color: #e8e8e8;
+	padding: 8px 12px;
+	border-radius: 4px;
+	font-family: monospace;
+	font-size: 0.85rem;
+	color: #333;
+	margin-top: 8px;
+}
+
+.setup-actions {
+	display: flex;
+	gap: 12px;
+	justify-content: center;
+	margin-top: 24px;
+}
+
+.setup-button {
+	padding: 12px 24px;
+	border-radius: 8px;
+	font-size: 1rem;
+	font-weight: 500;
+	cursor: pointer;
+	transition: all 0.2s ease;
+	border: none;
+}
+
+.setup-button.primary {
+	background-color: #646cff;
+	color: white;
+}
+
+.setup-button.primary:hover:not(:disabled) {
+	background-color: #535bf2;
+}
+
+.setup-button.secondary {
+	background-color: transparent;
+	color: #666;
+	border: 1px solid #ddd;
+}
+
+.setup-button.secondary:hover:not(:disabled) {
+	background-color: #f5f5f5;
+}
+
+.setup-button:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+.setup-loading {
+	font-size: 1rem;
+	color: #666;
+	padding: 40px;
+}
+
+.setup-error {
+	background-color: #fee2e2;
+	border: 1px solid #fecaca;
+	border-radius: 8px;
+	padding: 12px;
+	margin-bottom: 16px;
+	color: #dc2626;
+	font-size: 0.9rem;
+}
+
+.setup-result {
+	border-radius: 8px;
+	padding: 16px;
+	margin-bottom: 16px;
+	font-size: 0.95rem;
+}
+
+.setup-result.success {
+	background-color: #dcfce7;
+	border: 1px solid #86efac;
+	color: #166534;
+}
+
+.setup-result.info {
+	background-color: #e0f2fe;
+	border: 1px solid #7dd3fc;
+	color: #075985;
+}
+
+.setup-hint {
+	font-size: 0.85rem;
+	margin-top: 8px;
+	opacity: 0.8;
+}
+
+.setup-device-name {
+	font-size: 0.9rem;
+	color: #4caf50;
+	font-weight: 500;
+	margin-bottom: 16px;
+}
+
+.setup-footer-hint {
+	font-size: 0.8rem;
+	color: #999;
+	margin-top: 16px;
+	font-style: italic;
+}
+
+.setup-quick-tips {
+	text-align: left;
+	background-color: #f8f9fa;
+	border-radius: 12px;
+	padding: 20px;
+	margin-bottom: 24px;
+}
+
+.setup-quick-tips h4 {
+	font-size: 1rem;
+	font-weight: 600;
+	color: #444;
+	margin-bottom: 12px;
+}
+
+.setup-quick-tips ul {
+	list-style: none;
+	padding: 0;
+}
+
+.setup-quick-tips li {
+	font-size: 0.9rem;
+	color: #666;
+	margin-bottom: 8px;
+	padding-left: 20px;
+	position: relative;
+}
+
+.setup-quick-tips li::before {
+	content: "•";
+	position: absolute;
+	left: 4px;
+	color: #646cff;
+	font-weight: bold;
+}
+
+/* Dark mode for setup wizard */
+@media (prefers-color-scheme: dark) {
+	.app-loading {
+		background-color: #0f0f0f;
+		color: #fff;
+	}
+
+	.setup-wizard {
+		background-color: #1a1a2e;
+		color: #fff;
+	}
+
+	.setup-step h2 {
+		color: #fff;
+	}
+
+	.setup-description {
+		color: #aaa;
+	}
+
+	.setup-features {
+		background-color: #252540;
+	}
+
+	.feature-item {
+		color: #ccc;
+	}
+
+	.setup-info-box {
+		background-color: #252540;
+		border-color: #3a3a5c;
+	}
+
+	.setup-info-box.warning {
+		background-color: #3f2e20;
+		border-color: #b45309;
+	}
+
+	.setup-info-box h4 {
+		color: #ddd;
+	}
+
+	.setup-info-box p {
+		color: #aaa;
+	}
+
+	.setup-info-box code {
+		background-color: #0f0f0f;
+		color: #ddd;
+	}
+
+	.setup-button.secondary {
+		color: #aaa;
+		border-color: #444;
+	}
+
+	.setup-button.secondary:hover:not(:disabled) {
+		background-color: #252540;
+	}
+
+	.setup-error {
+		background-color: #451a1a;
+		border-color: #991b1b;
+		color: #fca5a5;
+	}
+
+	.setup-result.success {
+		background-color: #1a3a1a;
+		border-color: #2f5a2f;
+		color: #86efac;
+	}
+
+	.setup-result.info {
+		background-color: #1a2a3a;
+		border-color: #2a4a6a;
+		color: #7dd3fc;
+	}
+
+	.setup-quick-tips {
+		background-color: #252540;
+	}
+
+	.setup-quick-tips h4 {
+		color: #ddd;
+	}
+
+	.setup-quick-tips li {
+		color: #aaa;
+	}
+
+	.setup-footer-hint {
+		color: #666;
 	}
 }

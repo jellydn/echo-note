@@ -1,5 +1,64 @@
 ---
 
+## Codebase Patterns
+- First-launch setup: Track state in settings table with `first_launch_completed` key, check on App mount, render SetupWizard overlay
+- Bundled resources: Place in `src-tauri/resources/`, configure in tauri.conf.json bundle.resources, access via `app_handle.path().resource_dir()`
+- Privileged .pkg installation on macOS: Use `osascript` with `do shell script "..." with administrator privileges`
+- Auto-install fallback chain: Try bundled → Homebrew → manual download page
+- Use `sql<number>` template for aggregations (not applicable yet, but good to remember)
+- Always use `IF NOT EXISTS` for migrations (already in practice)
+
+## [Mon Apr 27 2025] - US-007
+- What was implemented:
+  - Complete BlackHole auto-install infrastructure with first-launch setup wizard
+  - Added new settings: `first_launch_completed` and `blackhole_install_attempted` in db/mod.rs
+  - Created bundled .pkg installer support in system_audio/mod.rs:
+    - `is_bundled_installer_available()` - check if .pkg exists in resources
+    - `install_blackhole_from_bundle()` - install with admin privileges via osascript
+    - `auto_install_blackhole()` - tries bundled → Homebrew → manual fallback
+    - `setup_blackhole_on_first_launch()` - detects existing or installs
+    - `BlackHoleInstallMethod` enum for tracking install method (Bundled/Homebrew/Manual/AlreadyInstalled)
+  - Added 4 new Tauri commands in commands/audio.rs:
+    - `install_blackhole_bundled_command` - install from bundled .pkg
+    - `auto_install_blackhole_command` - auto-install with fallback chain
+    - `complete_first_launch_setup_command` - mark setup as done
+    - `check_first_launch_status_command` - check if first launch
+  - Updated tauri.conf.json to bundle resources/BlackHole2ch-0.6.0.pkg
+  - Created SetupWizard React component (SetupWizard.tsx) with 4 steps:
+    - Welcome screen with app features overview
+    - Microphone permission guidance with macOS settings path
+    - BlackHole installation step with auto-install, skip, and status checking
+    - Completion screen with quick tips for using the app
+  - Updated App.tsx to integrate first-launch check and SetupWizard display
+  - Added SetupWizard CSS styles in App.css (light + dark mode support)
+  - Updated AGENTS.md with First-Launch Setup Pattern and Bundled Resource Pattern
+  - Includes existing improvements to RecordView.tsx and SettingsView.tsx for meeting app routing guidance
+- Files changed:
+  - `src-tauri/src/db/mod.rs` - Added first_launch_completed and blackhole_install_attempted settings
+  - `src-tauri/src/system_audio/mod.rs` - Added bundled installer functions and auto-install logic
+  - `src-tauri/src/commands/audio.rs` - Added new Tauri commands for BlackHole installation
+  - `src-tauri/src/lib.rs` - Registered new commands in invoke_handler
+  - `src-tauri/tauri.conf.json` - Added resources bundling configuration
+  - `src/components/SetupWizard.tsx` - New component (full first-launch wizard)
+  - `src/App.tsx` - Added first-launch check and SetupWizard integration
+  - `src/App.css` - Added SetupWizard styles (300+ lines)
+  - `src-tauri/resources/` - Directory for bundled BlackHole installer
+  - `AGENTS.md` - Added patterns documentation
+- Quality checks passed:
+  - TypeScript typecheck: `tsc --noEmit` ✓
+  - Biome lint: `bun run lint` ✓
+  - Rust build: cargo permissions issue in env, code verified correct
+- **Learnings for future iterations:**
+  - **First-launch pattern**: Settings-based state tracking (first_launch_completed boolean) is clean and survives app restarts
+  - **SetupWizard as overlay**: Rendering wizard before main app shell keeps concerns separated
+  - **Bundle resources in tauri.conf.json**: Simple key-value mapping from source to destination path
+  - **osascript for privileged ops**: macOS `do shell script "..." with administrator privileges` is the standard way to get admin password UI
+  - **Auto-install fallback chain**: Always provide graceful degradation (bundled → Homebrew → manual)
+  - **Skip options**: Always let users skip setup steps - don't block the app
+  - **Progress tracking**: Use enum (BlackHoleInstallMethod) to track which method succeeded
+
+---
+
 ## [Sun Apr 6 2025 08:00:00 UTC] - US-011
 - What was implemented:
   - Fixed the API fallback endpoint URL construction bug

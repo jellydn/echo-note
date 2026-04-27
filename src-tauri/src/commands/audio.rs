@@ -1,8 +1,12 @@
 use crate::{ApiResponse, AppStateExt};
 use audio::{get_recordings_dir, list_audio_devices, RecordingResult};
-use db::{get_setting, DEFAULT_AUDIO_DEVICE};
+use db::{get_setting, set_setting, DEFAULT_AUDIO_DEVICE};
 use serde::Serialize;
-use system_audio::{get_blackhole_device_name, install_blackhole_driver, is_blackhole_installed};
+use system_audio::{
+    auto_install_blackhole, get_blackhole_device_name, install_blackhole_driver,
+    install_blackhole_from_bundle, is_blackhole_installed, setup_blackhole_on_first_launch,
+    BlackHoleInstallMethod,
+};
 use tauri::State;
 
 use crate::{audio, db, system_audio};
@@ -153,4 +157,104 @@ pub async fn install_blackhole_homebrew_command() -> Result<ApiResponse<bool>, S
     })?;
 
     Ok(ApiResponse::success(true))
+}
+
+#[derive(Serialize, Clone)]
+pub struct BlackHoleInstallResponse {
+    pub success: bool,
+    pub method: String,
+    pub message: String,
+}
+
+#[tauri::command]
+pub async fn install_blackhole_bundled_command(
+    app_handle: tauri::AppHandle,
+) -> Result<ApiResponse<BlackHoleInstallResponse>, String> {
+    let method = install_blackhole_from_bundle(&app_handle).map_err(|e| {
+        format!(
+            "Bundled installation failed: {}. Try Homebrew or manual installation instead.",
+            e
+        )
+    })?;
+
+    let response = BlackHoleInstallResponse {
+        success: true,
+        method: "bundled".to_string(),
+        message: "BlackHole installed successfully from bundled package".to_string(),
+    };
+
+    log::info!("BlackHole installed via bundled package: {:?}", method);
+    Ok(ApiResponse::success(response))
+}
+
+#[tauri::command]
+pub async fn auto_install_blackhole_command(
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppStateExt>,
+) -> Result<ApiResponse<BlackHoleInstallResponse>, String> {
+    let method = auto_install_blackhole(&app_handle).map_err(|e| {
+        format!(
+            "Auto-installation failed: {}. Please install manually from Settings.",
+            e
+        )
+    })?;
+
+    // Mark that we've attempted BlackHole installation
+    set_setting(&state.db, "blackhole_install_attempted", "true")
+        .await
+        .map_err(|e| format!("Failed to record installation attempt: {}", e))?;
+
+    let method_str = match method {
+        BlackHoleInstallMethod::Bundled => "bundled",
+        BlackHoleInstallMethod::Homebrew => "homebrew",
+        BlackHoleInstallMethod::Manual => "manual",
+        BlackHoleInstallMethod::AlreadyInstalled => "already_installed",
+    };
+
+    let message = match method {
+        BlackHoleInstallMethod::Bundled => {
+            "BlackHole installed successfully from bundled package".to_string()
+        }
+        BlackHoleInstallMethod::Homebrew => {
+            "BlackHole installation started via Homebrew. Check Terminal for progress.".to_string()
+        }
+        BlackHoleInstallMethod::Manual => {
+            "Download page opened. Please download and install manually, then restart the app."
+                .to_string()
+        }
+        BlackHoleInstallMethod::AlreadyInstalled => "BlackHole was already installed".to_string(),
+    };
+
+    let response = BlackHoleInstallResponse {
+        success: method != BlackHoleInstallMethod::Manual,
+        method: method_str.to_string(),
+        message,
+    };
+
+    log::info!("BlackHole auto-install result: {:?}", method);
+    Ok(ApiResponse::success(response))
+}
+
+#[tauri::command]
+pub async fn complete_first_launch_setup_command(
+    state: State<'_, AppStateExt>,
+) -> Result<ApiResponse<bool>, String> {
+    set_setting(&state.db, "first_launch_completed", "true")
+        .await
+        .map_err(|e| format!("Failed to mark first launch as completed: {}", e))?;
+
+    log::info!("First launch setup marked as completed");
+    Ok(ApiResponse::success(true))
+}
+
+#[tauri::command]
+pub async fn check_first_launch_status_command(
+    state: State<'_, AppStateExt>,
+) -> Result<ApiResponse<bool>, String> {
+    let is_first_launch = get_setting(&state.db, "first_launch_completed", "false")
+        .await
+        .map_err(|e| format!("Failed to check first launch status: {}", e))?;
+
+    // Return true if this IS the first launch (first_launch_completed is "false")
+    Ok(ApiResponse::success(is_first_launch == "false"))
 }

@@ -463,7 +463,8 @@ export function RecordView({ onMeetingCreated, onNavigateToSettings }: RecordVie
 					<div className="record-instructions">
 						<p>Click the button above to start recording your meeting.</p>
 						<p className="record-hint">
-							The app will capture both microphone and system audio (if BlackHole is installed).
+							Zoom and Microsoft Teams audio is captured when their speaker/output is routed through
+							BlackHole.
 						</p>
 						<div className="mic-test">
 							<button

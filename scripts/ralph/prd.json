@@ -100,7 +100,7 @@
 			],
 			"priority": 7,
 			"passes": true,
-			"notes": "Implemented: Added install_blackhole_command Tauri command, BlackHole status UI in Settings with install button, warning when missing, and help text explaining BlackHole functionality. The install flow uses the bundled .pkg installer with administrator privileges."
+			"notes": "Implemented 2026-04-27: BlackHole auto-install with first-launch setup wizard. Bundled .pkg infrastructure configured in tauri.conf.json. SetupWizard component guides users through: welcome, microphone permission guidance, BlackHole auto-install (bundled → Homebrew → manual fallback), and completion. New Tauri commands: install_blackhole_bundled_command, auto_install_blackhole_command, complete_first_launch_setup_command, check_first_launch_status_command. Auto-install attempts: bundled pkg (with admin privileges via osascript), Homebrew if available, manual download page as fallback. First launch state tracked in settings table via 'first_launch_completed' key. Settings updated with meeting app routing guides for Zoom and Teams. AGENTS.md updated with First-Launch Setup Pattern and Bundled Resource Pattern."
 		},
 		{
 			"id": "US-008",
@@ -264,6 +264,22 @@
 			"priority": 17,
 			"passes": true,
 			"notes": "Already implemented within SettingsView (US-016): download button per model, progress bar via whisper-download-progress events, 'Downloaded' checkmark status, and needsModelDownload first-launch prompt. All acceptance criteria met."
+		},
+		{
+			"id": "US-018",
+			"title": "Support Zoom and Microsoft Teams audio routing",
+			"description": "As a user, I want clear Zoom and Microsoft Teams setup support so meeting audio from those apps is captured with my microphone.",
+			"acceptanceCriteria": [
+				"Settings includes Zoom-specific speaker/output routing guidance for BlackHole",
+				"Settings includes Microsoft Teams-specific speaker/output routing guidance for BlackHole",
+				"Record view makes Zoom and Microsoft Teams support visible before recording",
+				"Guidance keeps EchoNote's microphone input separate from meeting app speaker/output routing",
+				"Typecheck passes",
+				"Biome check passes"
+			],
+			"priority": 18,
+			"passes": true,
+			"notes": "Implemented 2026-04-27: SettingsView now includes a Meeting App Routing section with app-specific setup for Zoom and Microsoft Teams. RecordView now calls out Zoom and Microsoft Teams capture through BlackHole before recording."
 		}
 	]
 }
