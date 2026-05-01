@@ -48,7 +48,7 @@
 - Risk: API keys stored in SQLite database without encryption
 - Files: `src-tauri/src/db/mod.rs` (settings table), `src-tauri/src/commands/llm.rs`
 - Current mitigation: Keys are stored locally only; app claims "privacy-first" approach
-- Recommendations: 
+- Recommendations:
   - Use macOS Keychain or similar OS-level secure storage
   - At minimum, encrypt sensitive settings with a device-specific key
   - Consider marking the key field as "sensitive" in the database schema

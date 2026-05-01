@@ -1,6 +1,6 @@
 mod audio;
 mod commands;
-mod db;
+pub mod db;
 mod llm;
 mod system_audio;
 mod whisper;
