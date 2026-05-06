@@ -251,7 +251,17 @@ pub struct TranscriptionProgress {
 #[derive(Clone, serde::Serialize)]
 pub struct TranscriptionResult {
     pub text: String,
+    pub formatted_text: String,
+    pub segments: Vec<TranscriptSegment>,
     pub duration_seconds: f64,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct TranscriptSegment {
+    pub start_seconds: f64,
+    pub end_seconds: f64,
+    pub speaker: String,
+    pub text: String,
 }
 
 /// Transcribe audio file using Whisper
@@ -348,6 +358,7 @@ pub fn transcribe_audio(
 
     // Process audio in chunks if needed (for very long files)
     let mut full_text = String::new();
+    let mut transcript_segments = Vec::new();
     let total_samples = audio_data.len();
     let chunk_size = MAX_AUDIO_SAMPLES;
 
@@ -383,8 +394,33 @@ pub fn transcribe_audio(
             let segment_text = state
                 .full_get_segment_text(i)
                 .map_err(|e| anyhow::anyhow!("Failed to get segment text: {:?}", e))?;
-            full_text.push_str(&segment_text);
+            let segment_text = segment_text.trim();
+            if segment_text.is_empty() {
+                continue;
+            }
+
+            let chunk_offset_seconds = (chunk_idx * chunk_size) as f64 / 16000.0;
+            let start_seconds = chunk_offset_seconds
+                + state
+                    .full_get_segment_t0(i)
+                    .map_err(|e| anyhow::anyhow!("Failed to get segment start time: {:?}", e))?
+                    as f64
+                    * 0.01;
+            let end_seconds = chunk_offset_seconds
+                + state
+                    .full_get_segment_t1(i)
+                    .map_err(|e| anyhow::anyhow!("Failed to get segment end time: {:?}", e))?
+                    as f64
+                    * 0.01;
+
+            full_text.push_str(segment_text);
             full_text.push(' ');
+            transcript_segments.push(TranscriptSegment {
+                start_seconds,
+                end_seconds,
+                speaker: "Speaker 1".to_string(),
+                text: segment_text.to_string(),
+            });
         }
     }
 
@@ -402,8 +438,38 @@ pub fn transcribe_audio(
 
     Ok(TranscriptionResult {
         text: full_text.trim().to_string(),
+        formatted_text: format_transcript_segments(&transcript_segments),
+        segments: transcript_segments,
         duration_seconds: duration,
     })
+}
+
+fn format_transcript_segments(segments: &[TranscriptSegment]) -> String {
+    segments
+        .iter()
+        .map(|segment| {
+            format!(
+                "[{}] {}: {}",
+                format_timestamp(segment.start_seconds),
+                segment.speaker,
+                segment.text
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_timestamp(seconds: f64) -> String {
+    let total_seconds = seconds.max(0.0).floor() as u64;
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let seconds = total_seconds % 60;
+
+    if hours > 0 {
+        format!("{hours:02}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes:02}:{seconds:02}")
+    }
 }
 
 /// Resample audio using linear interpolation
@@ -484,5 +550,35 @@ mod tests {
 
         assert!((mono[0] - 0.49998474).abs() < 0.00001);
         assert!((mono[1] - -0.5).abs() < 0.00001);
+    }
+
+    #[test]
+    fn test_format_timestamp() {
+        assert_eq!(format_timestamp(0.0), "00:00");
+        assert_eq!(format_timestamp(65.9), "01:05");
+        assert_eq!(format_timestamp(3661.2), "01:01:01");
+    }
+
+    #[test]
+    fn test_format_transcript_segments() {
+        let segments = vec![
+            TranscriptSegment {
+                start_seconds: 0.0,
+                end_seconds: 1.5,
+                speaker: "Speaker 1".to_string(),
+                text: "Hello".to_string(),
+            },
+            TranscriptSegment {
+                start_seconds: 62.0,
+                end_seconds: 64.0,
+                speaker: "Speaker 1".to_string(),
+                text: "Follow up tomorrow".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            format_transcript_segments(&segments),
+            "[00:00] Speaker 1: Hello\n[01:02] Speaker 1: Follow up tomorrow"
+        );
     }
 }
