@@ -316,33 +316,8 @@ pub fn transcribe_audio(
     );
 
     // Read samples and convert to mono f32 at 16kHz
-    let samples: Vec<f32> = reader
-        .samples::<i16>()
-        .filter_map(|s| s.ok())
-        .enumerate()
-        .map(|(i, sample)| {
-            // Convert to mono by averaging channels
-            if spec.channels > 1 && i % spec.channels as usize == 0 {
-                // This is the first channel of a frame
-                sample as f32 / 32768.0
-            } else if spec.channels > 1 {
-                // Skip additional channels for now (we'll average later)
-                0.0
-            } else {
-                sample as f32 / 32768.0
-            }
-        })
-        .collect();
-
-    // If stereo, we need to properly average
-    let audio_data: Vec<f32> = if spec.channels > 1 {
-        samples
-            .chunks(spec.channels as usize)
-            .map(|chunk| chunk.iter().sum::<f32>() / spec.channels as f32)
-            .collect()
-    } else {
-        samples
-    };
+    let samples: Vec<i16> = reader.samples::<i16>().filter_map(|s| s.ok()).collect();
+    let audio_data = pcm_i16_to_mono_f32(&samples, spec.channels);
 
     // Resample to 16kHz if needed
     let audio_data = if spec.sample_rate != 16000 {
@@ -433,12 +408,16 @@ pub fn transcribe_audio(
 
 /// Resample audio using linear interpolation
 fn resample_audio(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
+    if input.is_empty() {
+        return Vec::new();
+    }
+
     if from_rate == to_rate {
         return input.to_vec();
     }
 
     let ratio = to_rate as f64 / from_rate as f64;
-    let output_len = (input.len() as f64 * ratio) as usize;
+    let output_len = (input.len() as f64 * ratio).round().max(1.0) as usize;
     let mut output = Vec::with_capacity(output_len);
 
     for i in 0..output_len {
@@ -452,6 +431,21 @@ fn resample_audio(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     }
 
     output
+}
+
+fn pcm_i16_to_mono_f32(samples: &[i16], channels: u16) -> Vec<f32> {
+    let channels = usize::from(channels.max(1));
+
+    samples
+        .chunks(channels)
+        .map(|frame| {
+            frame
+                .iter()
+                .map(|sample| f32::from(*sample) / 32768.0)
+                .sum::<f32>()
+                / frame.len() as f32
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -475,5 +469,20 @@ mod tests {
         let input = vec![0.0, 0.5, 1.0, 0.5, 0.0];
         let output = resample_audio(&input, 16000, 8000);
         assert_eq!(output.len(), 3); // Approximately half the size
+    }
+
+    #[test]
+    fn test_resample_audio_empty_input() {
+        assert!(resample_audio(&[], 48000, 16000).is_empty());
+    }
+
+    #[test]
+    fn test_pcm_i16_to_mono_f32_averages_stereo_channels() {
+        let samples = vec![32767, 0, 0, -32768];
+
+        let mono = pcm_i16_to_mono_f32(&samples, 2);
+
+        assert!((mono[0] - 0.49998474).abs() < 0.00001);
+        assert!((mono[1] - -0.5).abs() < 0.00001);
     }
 }
