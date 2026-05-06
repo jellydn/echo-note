@@ -47,6 +47,7 @@ describe("RecordView", () => {
 						file_path: "/path/to/recording.wav",
 						duration_seconds: 60,
 						used_system_audio: true,
+						system_audio_error: null,
 					},
 					error: null,
 				};
@@ -75,6 +76,41 @@ describe("RecordView", () => {
 		expect(screen.getByLabelText("Meeting Title")).toBeInTheDocument();
 		expect(screen.getByText("Duration: 01:00")).toBeInTheDocument();
 		expect(screen.getByText("System audio included")).toBeInTheDocument();
+	});
+
+	it("shows warning when system audio capture fails", async () => {
+		vi.mocked(invoke).mockImplementation(async (command: string) => {
+			if (command === "start_recording_command") {
+				return { success: true, data: true, error: null };
+			}
+			if (command === "stop_recording_command") {
+				return {
+					success: true,
+					data: {
+						file_path: "/path/to/recording.wav",
+						duration_seconds: 60,
+						used_system_audio: false,
+						system_audio_error: "BlackHole stream failed",
+					},
+					error: null,
+				};
+			}
+			return { success: false, data: null, error: "Unknown command" };
+		});
+
+		render(<RecordView />);
+
+		await userEvent.click(screen.getByRole("button", { name: /start recording/i }));
+		await waitFor(() => {
+			expect(screen.getByText("Recording in progress...")).toBeInTheDocument();
+		});
+
+		await userEvent.click(screen.getByRole("button", { name: /stop recording/i }));
+
+		await waitFor(() => {
+			expect(screen.getByText(/system audio was not captured/i)).toBeInTheDocument();
+		});
+		expect(screen.getByText(/blackhole stream failed/i)).toBeInTheDocument();
 	});
 
 	it("tests microphone and shows result", async () => {
@@ -126,6 +162,7 @@ describe("RecordView", () => {
 						file_path: "/path/to/recording.wav",
 						duration_seconds: 60,
 						used_system_audio: false,
+						system_audio_error: null,
 					},
 					error: null,
 				};
@@ -215,6 +252,7 @@ describe("RecordView", () => {
 						file_path: "/path/to/recording.wav",
 						duration_seconds: 30,
 						used_system_audio: false,
+						system_audio_error: null,
 					},
 					error: null,
 				};

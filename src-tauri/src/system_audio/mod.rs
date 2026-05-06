@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde_json::Value;
+use std::collections::HashSet;
 use std::process::Command;
 
 /// BlackHole virtual audio driver constants
@@ -14,12 +15,14 @@ pub fn is_blackhole_installed() -> bool {
     match list_core_audio_devices() {
         Ok(devices) => {
             log::info!("Found audio devices: {:?}", devices);
-            let found = devices.iter().any(|name| {
-                let name_lower = name.to_lowercase();
-                name_lower.contains("blackhole")
-            });
+            let found = devices.iter().any(|name| is_blackhole_device_name(name));
             log::info!("BlackHole detection result: {}", found);
-            found
+            if found {
+                true
+            } else {
+                log::info!("BlackHole not found in JSON device list. Trying fallback method.");
+                is_blackhole_installed_fallback()
+            }
         }
         Err(e) => {
             log::warn!(
@@ -79,29 +82,19 @@ pub fn get_blackhole_device_name() -> Option<String> {
     match list_core_audio_devices() {
         Ok(devices) => devices
             .into_iter()
-            .find(|name| name.to_lowercase().contains("blackhole")),
+            .find(|name| is_blackhole_device_name(name)),
         Err(_) => None,
     }
 }
 
-/// System profiler audio data structure
-#[derive(Debug, Deserialize)]
-struct SystemProfilerAudioData {
-    #[serde(rename = "SPAudioDataType")]
-    audio_data: Vec<AudioDeviceList>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AudioDeviceList {
-    #[serde(rename = "_items")]
-    items: Option<Vec<AudioDevice>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AudioDevice {
-    #[serde(rename = "_name")]
-    name: String,
-}
+const AUDIO_DEVICE_NAME_KEYS: &[&str] = &[
+    "_name",
+    "name",
+    "device_name",
+    "coreaudio_device_name",
+    "spaudio_device_name",
+    "spaudio_name",
+];
 
 /// List all CoreAudio devices using system_profiler with proper JSON parsing
 fn list_core_audio_devices() -> Result<Vec<String>> {
@@ -120,17 +113,15 @@ fn list_core_audio_devices() -> Result<Vec<String>> {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // Try to parse as JSON first
-    match serde_json::from_str::<SystemProfilerAudioData>(&stdout) {
+    match serde_json::from_str::<Value>(&stdout) {
         Ok(data) => {
-            let mut devices = Vec::new();
-            for device_list in data.audio_data {
-                if let Some(items) = device_list.items {
-                    for device in items {
-                        devices.push(device.name);
-                    }
-                }
-            }
+            let devices = parse_system_profiler_audio_devices_from_json(&data);
             log::info!("Parsed {} audio devices from JSON", devices.len());
+            if devices.is_empty() {
+                return Err(anyhow::anyhow!(
+                    "system_profiler JSON did not contain audio device names"
+                ));
+            }
             Ok(devices)
         }
         Err(e) => {
@@ -138,31 +129,115 @@ fn list_core_audio_devices() -> Result<Vec<String>> {
                 "Failed to parse system_profiler JSON: {}. Falling back to line parsing.",
                 e
             );
-            // Fallback to line-by-line parsing
-            let mut devices = Vec::new();
-            for line in stdout.lines() {
-                if line.contains("_name") {
-                    if let Some(name) = extract_json_string_value(line) {
-                        devices.push(name);
-                    }
-                }
-            }
-            Ok(devices)
+            Ok(parse_system_profiler_audio_devices_from_text(&stdout))
         }
     }
 }
 
-/// Extract a string value from a JSON key-value line
-fn extract_json_string_value(line: &str) -> Option<String> {
-    // Look for pattern: "_name" : "Device Name"
-    if let Some(start) = line.find(':') {
-        let value_part = &line[start + 1..];
-        let trimmed = value_part.trim();
-        if trimmed.starts_with('"') && trimmed.ends_with('"') {
-            let value = &trimmed[1..trimmed.len() - 1];
-            return Some(value.to_string());
+fn parse_system_profiler_audio_devices_from_json(data: &Value) -> Vec<String> {
+    let mut devices = Vec::new();
+    collect_audio_device_names(data, &mut devices);
+    dedupe_device_names(devices)
+}
+
+fn collect_audio_device_names(value: &Value, devices: &mut Vec<String>) {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                collect_audio_device_names(item, devices);
+            }
+        }
+        Value::Object(map) => {
+            for (key, value) in map {
+                if is_audio_device_name_key(key) {
+                    if let Some(name) = value
+                        .as_str()
+                        .map(str::trim)
+                        .filter(|name| !name.is_empty())
+                    {
+                        devices.push(name.to_string());
+                    }
+                }
+                collect_audio_device_names(value, devices);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn parse_system_profiler_audio_devices_from_text(stdout: &str) -> Vec<String> {
+    let mut devices = Vec::new();
+
+    for line in stdout.lines() {
+        if let Some(name) = extract_json_string_value(line) {
+            devices.push(name);
+            continue;
+        }
+
+        if let Some(name) = extract_text_device_heading(line) {
+            devices.push(name);
         }
     }
+
+    dedupe_device_names(devices)
+}
+
+fn is_audio_device_name_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    AUDIO_DEVICE_NAME_KEYS.contains(&key.as_str())
+}
+
+fn is_blackhole_device_name(name: &str) -> bool {
+    name.to_ascii_lowercase().contains("blackhole")
+}
+
+fn extract_text_device_heading(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let heading = trimmed.strip_suffix(':')?.trim();
+
+    if heading.is_empty() || heading.contains(':') {
+        return None;
+    }
+
+    let heading_lower = heading.to_ascii_lowercase();
+    if matches!(
+        heading_lower.as_str(),
+        "audio" | "devices" | "input" | "output" | "system profiler"
+    ) {
+        return None;
+    }
+
+    Some(heading.to_string())
+}
+
+fn dedupe_device_names(devices: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut deduped = Vec::new();
+
+    for device in devices {
+        let key = device.to_ascii_lowercase();
+        if seen.insert(key) {
+            deduped.push(device);
+        }
+    }
+
+    deduped
+}
+
+/// Extract a string value from a JSON key-value line
+fn extract_json_string_value(line: &str) -> Option<String> {
+    let (key, value_part) = line.split_once(':')?;
+    let key = key.trim().trim_matches('"');
+    if !is_audio_device_name_key(key) {
+        return None;
+    }
+
+    let trimmed = value_part.trim().trim_end_matches(',');
+    if trimmed.starts_with('"') && trimmed.ends_with('"') {
+        let value = &trimmed[1..trimmed.len() - 1];
+        return serde_json::from_str::<String>(&format!("\"{value}\"")).ok();
+    }
+
     None
 }
 
@@ -229,6 +304,123 @@ mod tests {
         assert_eq!(
             extract_json_string_value(line),
             Some("MacBook Pro Speakers".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_json_string_value_ignores_non_name_keys() {
+        let line = r#""manufacturer" : "BlackHole Audio""#;
+        assert_eq!(extract_json_string_value(line), None);
+    }
+
+    #[test]
+    fn test_parse_system_profiler_current_items_shape() {
+        let data: Value = serde_json::from_str(
+            r#"{
+                "SPAudioDataType": [
+                    {
+                        "_items": [
+                            { "_name": "MacBook Pro Speakers" },
+                            { "_name": "BlackHole 2ch" }
+                        ]
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            parse_system_profiler_audio_devices_from_json(&data),
+            vec!["MacBook Pro Speakers", "BlackHole 2ch"]
+        );
+    }
+
+    #[test]
+    fn test_parse_system_profiler_named_items_shape() {
+        let data: Value = serde_json::from_str(
+            r#"{
+                "SPAudioDataType": [
+                    {
+                        "items": [
+                            { "name": "Studio Display Speakers" },
+                            { "spaudio_device_name": "BlackHole 16ch" }
+                        ]
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            parse_system_profiler_audio_devices_from_json(&data),
+            vec!["Studio Display Speakers", "BlackHole 16ch"]
+        );
+    }
+
+    #[test]
+    fn test_parse_system_profiler_deeply_nested_shape() {
+        let data: Value = serde_json::from_str(
+            r#"{
+                "SPAudioDataType": [
+                    {
+                        "audio": {
+                            "devices": [
+                                {
+                                    "coreaudio_device_name": "External Headphones",
+                                    "channels": 2
+                                },
+                                {
+                                    "device_name": "BlackHole2ch",
+                                    "channels": 2
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            parse_system_profiler_audio_devices_from_json(&data),
+            vec!["External Headphones", "BlackHole2ch"]
+        );
+    }
+
+    #[test]
+    fn test_parse_system_profiler_text_output_shape() {
+        let stdout = r#"
+Audio:
+
+    Devices:
+
+        MacBook Pro Speakers:
+
+          Default Output Device: Yes
+          Manufacturer: Apple Inc.
+
+        BlackHole 2ch:
+
+          Input Channels: 2
+          Output Channels: 2
+"#;
+
+        assert_eq!(
+            parse_system_profiler_audio_devices_from_text(stdout),
+            vec!["MacBook Pro Speakers", "BlackHole 2ch"]
+        );
+    }
+
+    #[test]
+    fn test_parse_system_profiler_text_json_line_shape() {
+        let stdout = r#"
+          "_name" : "MacBook Pro Speakers",
+          "_name" : "BlackHole \"2ch\"",
+"#;
+
+        assert_eq!(
+            parse_system_profiler_audio_devices_from_text(stdout),
+            vec!["MacBook Pro Speakers", "BlackHole \"2ch\""]
         );
     }
 }

@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::time::Instant;
 
 /// Default Ollama API endpoint
@@ -51,6 +52,14 @@ struct ChatCompletionRequest {
     model: String,
     messages: Vec<ChatMessage>,
     temperature: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<ResponseFormat>,
+}
+
+/// JSON response format hint for OpenAI-compatible providers
+#[derive(Serialize)]
+struct ResponseFormat {
+    r#type: String,
 }
 
 /// Chat message for API requests
@@ -93,7 +102,7 @@ pub async fn generate_summary_api(
         model
     );
 
-    let prompt = build_summary_prompt(transcript);
+    let prompt = build_summary_json_prompt(transcript);
 
     let request = ChatCompletionRequest {
         model: model.to_string(),
@@ -102,6 +111,9 @@ pub async fn generate_summary_api(
             content: prompt,
         }],
         temperature: 0.7,
+        response_format: Some(ResponseFormat {
+            r#type: "json_object".to_string(),
+        }),
     };
 
     let client = reqwest::Client::builder()
@@ -261,6 +273,28 @@ Here is the transcript:
     )
 }
 
+/// Build the prompt for JSON meeting summarization with API providers.
+fn build_summary_json_prompt(transcript: &str) -> String {
+    format!(
+        r#"You are a meeting assistant that creates structured summaries from meeting transcripts.
+
+Analyze the following meeting transcript and return only a valid JSON object with this shape:
+
+{{
+  "key_points": ["3-5 bullet points of the most important discussion points"],
+  "decisions": ["Any decisions made during the meeting"],
+  "action_items": ["Tasks assigned with who should do what, if mentioned"]
+}}
+
+Use empty arrays for sections with no content.
+
+Here is the transcript:
+
+{}"#,
+        transcript
+    )
+}
+
 /// Parsed summary structure
 struct ParsedSummary {
     key_points: String,
@@ -268,52 +302,203 @@ struct ParsedSummary {
     action_items: String,
 }
 
+#[derive(Clone, Copy)]
+enum SummarySection {
+    KeyPoints,
+    Decisions,
+    ActionItems,
+}
+
 /// Parse the LLM response into structured sections
 fn parse_summary_response(response: &str) -> ParsedSummary {
     let response = response.trim();
 
-    // Find sections
-    let key_points = extract_section(response, "KEY POINTS:", Some("DECISIONS:"))
-        .or_else(|| extract_section(response, "Key Points:", Some("Decisions:")))
-        .or_else(|| extract_section(response, "Key points:", Some("Decisions:")))
-        .unwrap_or_default();
+    parse_json_summary(response).unwrap_or_else(|| parse_text_summary(response))
+}
 
-    let decisions = extract_section(response, "DECISIONS:", Some("ACTION ITEMS:"))
-        .or_else(|| extract_section(response, "Decisions:", Some("Action Items:")))
-        .or_else(|| extract_section(response, "Decisions:", Some("Action items:")))
-        .unwrap_or_default();
+fn parse_json_summary(response: &str) -> Option<ParsedSummary> {
+    let json_text = find_json_object(response)?;
+    let value: Value = serde_json::from_str(json_text).ok()?;
 
-    let action_items = extract_section(response, "ACTION ITEMS:", None)
-        .or_else(|| extract_section(response, "Action Items:", None))
-        .or_else(|| extract_section(response, "Action items:", None))
-        .unwrap_or_default();
+    let summary = ParsedSummary {
+        key_points: clean_section(&json_section_value(
+            &value,
+            &[
+                "key_points",
+                "keyPoints",
+                "key points",
+                "Key Points",
+                "KEY POINTS",
+            ],
+        )),
+        decisions: clean_section(&json_section_value(
+            &value,
+            &["decisions", "Decisions", "DECISIONS"],
+        )),
+        action_items: clean_section(&json_section_value(
+            &value,
+            &[
+                "action_items",
+                "actionItems",
+                "action items",
+                "Action Items",
+                "ACTION ITEMS",
+            ],
+        )),
+    };
 
-    // Clean up and format
-    ParsedSummary {
-        key_points: clean_section(&key_points),
-        decisions: clean_section(&decisions),
-        action_items: clean_section(&action_items),
+    if summary.key_points.is_empty()
+        && summary.decisions.is_empty()
+        && summary.action_items.is_empty()
+    {
+        None
+    } else {
+        Some(summary)
     }
 }
 
-/// Extract a section from text between start marker and optional end marker
-fn extract_section(text: &str, start_marker: &str, end_marker: Option<&str>) -> Option<String> {
-    let start_idx = text.find(start_marker)?;
-    let content_start = start_idx + start_marker.len();
+fn find_json_object(response: &str) -> Option<&str> {
+    let start = response.find('{')?;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut depth = 0usize;
 
-    let content_end = match end_marker {
-        Some(marker) => text[content_start..]
-            .find(marker)
-            .map(|idx| content_start + idx),
-        None => None,
-    };
+    for (offset, ch) in response[start..].char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
 
-    let content = match content_end {
-        Some(end) => &text[content_start..end],
-        None => &text[content_start..],
-    };
+        match ch {
+            '\\' if in_string => escaped = true,
+            '"' => in_string = !in_string,
+            '{' if !in_string => depth += 1,
+            '}' if !in_string => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    let end = start + offset + ch.len_utf8();
+                    return Some(&response[start..end]);
+                }
+            }
+            _ => {}
+        }
+    }
 
-    Some(content.trim().to_string())
+    None
+}
+
+fn json_section_value(value: &Value, keys: &[&str]) -> String {
+    keys.iter()
+        .find_map(|key| value.get(*key))
+        .map(json_value_to_lines)
+        .unwrap_or_default()
+}
+
+fn json_value_to_lines(value: &Value) -> String {
+    match value {
+        Value::Array(items) => items
+            .iter()
+            .filter_map(json_value_to_line)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => json_value_to_line(value).unwrap_or_default(),
+    }
+}
+
+fn json_value_to_line(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Null => None,
+        Value::Object(object) => object
+            .get("task")
+            .and_then(Value::as_str)
+            .or_else(|| object.get("description").and_then(Value::as_str))
+            .map(|task| {
+                object
+                    .get("person")
+                    .or_else(|| object.get("owner"))
+                    .or_else(|| object.get("assignee"))
+                    .and_then(Value::as_str)
+                    .map(|person| format!("{}: {}", person, task))
+                    .unwrap_or_else(|| task.to_string())
+            })
+            .or_else(|| Some(value.to_string())),
+        _ => Some(value.to_string()),
+    }
+}
+
+fn parse_text_summary(response: &str) -> ParsedSummary {
+    let mut current_section = None;
+    let mut key_points = Vec::new();
+    let mut decisions = Vec::new();
+    let mut action_items = Vec::new();
+
+    for line in response.lines() {
+        if let Some((section, remainder)) = parse_section_header(line) {
+            current_section = Some(section);
+            if !remainder.is_empty() {
+                push_section_line(
+                    section,
+                    remainder,
+                    &mut key_points,
+                    &mut decisions,
+                    &mut action_items,
+                );
+            }
+            continue;
+        }
+
+        if let Some(section) = current_section {
+            push_section_line(
+                section,
+                line,
+                &mut key_points,
+                &mut decisions,
+                &mut action_items,
+            );
+        }
+    }
+
+    // Clean up and format
+    ParsedSummary {
+        key_points: clean_section(&key_points.join("\n")),
+        decisions: clean_section(&decisions.join("\n")),
+        action_items: clean_section(&action_items.join("\n")),
+    }
+}
+
+fn parse_section_header(line: &str) -> Option<(SummarySection, &str)> {
+    let trimmed = line.trim().trim_start_matches('#').trim();
+    let (label, remainder) = trimmed
+        .split_once(':')
+        .map(|(label, remainder)| (label.trim(), remainder.trim()))
+        .unwrap_or((trimmed, ""));
+
+    let label = label
+        .trim_start_matches(|ch: char| ch.is_ascii_digit() || ch == '.' || ch == ')')
+        .trim();
+    let normalized = label.to_lowercase().replace(['_', '-'], " ");
+
+    match normalized.as_str() {
+        "key points" => Some((SummarySection::KeyPoints, remainder)),
+        "decisions" => Some((SummarySection::Decisions, remainder)),
+        "action items" => Some((SummarySection::ActionItems, remainder)),
+        _ => None,
+    }
+}
+
+fn push_section_line(
+    section: SummarySection,
+    line: &str,
+    key_points: &mut Vec<String>,
+    decisions: &mut Vec<String>,
+    action_items: &mut Vec<String>,
+) {
+    match section {
+        SummarySection::KeyPoints => key_points.push(line.to_string()),
+        SummarySection::Decisions => decisions.push(line.to_string()),
+        SummarySection::ActionItems => action_items.push(line.to_string()),
+    }
 }
 
 /// Clean up a section (remove "None" if it's the only content, normalize bullets)
@@ -374,6 +559,16 @@ mod tests {
     }
 
     #[test]
+    fn test_build_summary_json_prompt() {
+        let prompt = build_summary_json_prompt("Test transcript");
+        assert!(prompt.contains("\"key_points\""));
+        assert!(prompt.contains("\"decisions\""));
+        assert!(prompt.contains("\"action_items\""));
+        assert!(prompt.contains("valid JSON object"));
+        assert!(prompt.contains("Test transcript"));
+    }
+
+    #[test]
     fn test_parse_summary_response() {
         let response = r#"KEY POINTS:
 - Discussed project timeline
@@ -393,11 +588,92 @@ ACTION ITEMS:
     }
 
     #[test]
-    fn test_extract_section() {
-        let text = "KEY POINTS:\n- point 1\n\nDECISIONS:\n- decision 1";
+    fn test_parse_summary_response_json() {
+        let response = r#"{
+  "key_points": ["Discussed project timeline", "Reviewed budget"],
+  "decisions": ["Approved Q1 plan"],
+  "action_items": ["Alice: Prepare report", "Bob: Schedule follow-up"]
+}"#;
 
-        let section = extract_section(text, "KEY POINTS:", Some("DECISIONS:"));
-        assert_eq!(section.unwrap().trim(), "- point 1");
+        let summary = parse_summary_response(response);
+        assert_eq!(
+            summary.key_points,
+            "- Discussed project timeline\n- Reviewed budget"
+        );
+        assert_eq!(summary.decisions, "- Approved Q1 plan");
+        assert_eq!(
+            summary.action_items,
+            "- Alice: Prepare report\n- Bob: Schedule follow-up"
+        );
+    }
+
+    #[test]
+    fn test_parse_summary_response_markdown_fenced_json() {
+        let response = r#"Here is the summary:
+
+```json
+{
+  "Key Points": ["Discussed launch readiness"],
+  "Decisions": "Ship the beta",
+  "Action Items": [{"person": "Alice", "task": "Send release notes"}]
+}
+```"#;
+
+        let summary = parse_summary_response(response);
+        assert_eq!(summary.key_points, "- Discussed launch readiness");
+        assert_eq!(summary.decisions, "- Ship the beta");
+        assert_eq!(summary.action_items, "- Alice: Send release notes");
+    }
+
+    #[test]
+    fn test_parse_summary_response_lowercase_headers() {
+        let response = r#"key points:
+- Discussed project timeline
+
+decisions:
+- Approved Q1 plan
+
+action items:
+- Alice: Prepare report"#;
+
+        let summary = parse_summary_response(response);
+        assert_eq!(summary.key_points, "- Discussed project timeline");
+        assert_eq!(summary.decisions, "- Approved Q1 plan");
+        assert_eq!(summary.action_items, "- Alice: Prepare report");
+    }
+
+    #[test]
+    fn test_parse_summary_response_markdown_headers_with_missing_section() {
+        let response = r#"## Key Points
+- Discussed project timeline
+
+## Action Items
+- Alice: Prepare report"#;
+
+        let summary = parse_summary_response(response);
+        assert_eq!(summary.key_points, "- Discussed project timeline");
+        assert_eq!(summary.decisions, "");
+        assert_eq!(summary.action_items, "- Alice: Prepare report");
+    }
+
+    #[test]
+    fn test_parse_summary_response_json_missing_sections() {
+        let response = r#"{"key_points": ["Discussed project timeline"]}"#;
+
+        let summary = parse_summary_response(response);
+        assert_eq!(summary.key_points, "- Discussed project timeline");
+        assert_eq!(summary.decisions, "");
+        assert_eq!(summary.action_items, "");
+    }
+
+    #[test]
+    fn test_parse_summary_response_malformed_response() {
+        let response = "This is not structured summary content.";
+
+        let summary = parse_summary_response(response);
+        assert_eq!(summary.key_points, "");
+        assert_eq!(summary.decisions, "");
+        assert_eq!(summary.action_items, "");
     }
 
     #[test]

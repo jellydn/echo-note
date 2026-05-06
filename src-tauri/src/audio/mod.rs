@@ -39,6 +39,7 @@ pub struct RecordingResult {
     pub file_path: String,
     pub duration_seconds: f64,
     pub used_system_audio: bool,
+    pub system_audio_error: Option<String>,
 }
 
 /// Thread handle for a single recording
@@ -63,11 +64,12 @@ impl AudioRecorder {
         }
     }
 
-    pub fn is_recording(&self) -> bool {
-        self.state
+    pub fn is_recording(&self) -> Result<bool> {
+        let state = self
+            .state
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .is_recording
+            .map_err(|e| anyhow::anyhow!("Failed to lock recording state: {}", e))?;
+        Ok(state.is_recording)
     }
 
     /// Start recording audio from the microphone and optionally from system audio
@@ -80,7 +82,7 @@ impl AudioRecorder {
         mic_device_id: &str,
         system_device_name: Option<&str>,
     ) -> Result<()> {
-        if self.is_recording() {
+        if self.is_recording()? {
             return Err(anyhow::anyhow!("Recording is already in progress"));
         }
 
@@ -157,7 +159,7 @@ impl AudioRecorder {
     /// Stop recording and save to file
     /// If both mic and system audio were recorded, they are mixed together
     pub fn stop_recording(&mut self, output_dir: PathBuf) -> Result<RecordingResult> {
-        if !self.is_recording() {
+        if !self.is_recording()? {
             return Err(anyhow::anyhow!("No active recording to stop"));
         }
 
@@ -173,6 +175,7 @@ impl AudioRecorder {
         // Collect results from threads
         let mut mic_data: Option<DeviceRecordingState> = None;
         let mut system_data: Option<DeviceRecordingState> = None;
+        let mut system_audio_error: Option<String> = None;
 
         // Re-take handles to join them
         if let Some(handle) = self.mic_handle.take() {
@@ -192,21 +195,26 @@ impl AudioRecorder {
             match handle.audio_thread.join() {
                 Ok(Ok(state)) => system_data = Some(state),
                 Ok(Err(e)) => {
-                    log::error!("System audio recording error: {}", e);
+                    let message = e.to_string();
+                    log::error!("System audio recording error: {}", message);
                     // System audio failure is non-fatal — fall back to mic only
                     log::warn!("Falling back to mic-only audio");
+                    system_audio_error = Some(message);
                 }
                 Err(_) => {
-                    log::error!(
-                        "System audio recording thread panicked — falling back to mic only"
-                    );
+                    let message = "System audio recording thread panicked".to_string();
+                    log::error!("{} — falling back to mic only", message);
+                    system_audio_error = Some(message);
                 }
             }
         }
 
         // Get timing info
         let duration = {
-            let state_guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            let state_guard = self
+                .state
+                .lock()
+                .map_err(|e| anyhow::anyhow!("Failed to lock recording state: {}", e))?;
             state_guard
                 .start_time
                 .map(|t| t.elapsed().as_secs_f64())
@@ -274,13 +282,17 @@ impl AudioRecorder {
             .to_string();
 
         // Reset state
-        let mut current_state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut current_state = self
+            .state
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Failed to lock recording state: {}", e))?;
         *current_state = RecordingState::default();
 
         Ok(RecordingResult {
             file_path: file_path_str,
             duration_seconds: duration,
             used_system_audio,
+            system_audio_error,
         })
     }
 }
@@ -433,10 +445,15 @@ fn run_single_recording_thread(
             }
             Err(_) => {
                 // Timeout, check if we should continue
-                if !{
-                    let guard = state.lock().unwrap_or_else(|e| e.into_inner());
-                    guard.is_recording
-                } {
+                let should_continue = match state.lock() {
+                    Ok(guard) => guard.is_recording,
+                    Err(e) => {
+                        log::error!("Recording state lock poisoned: {}", e);
+                        false
+                    }
+                };
+
+                if !should_continue {
                     break;
                 }
             }
@@ -482,13 +499,71 @@ where
                 return;
             };
             for frame in data.chunks(channels) {
-                // Mix channels to mono if needed
-                let sample: f32 =
-                    frame.iter().map(|&s| f32::from_sample(s)).sum::<f32>() / channels as f32;
-                buffer.push(sample);
+                buffer.push(mono_sample_from_frame(frame));
             }
         },
         err_fn,
+        None,
+    )?;
+
+    Ok(stream)
+}
+
+fn mono_sample_from_frame<T>(frame: &[T]) -> f32
+where
+    T: Sample,
+    f32: FromSample<T>,
+{
+    if frame.is_empty() {
+        return 0.0;
+    }
+
+    frame.iter().map(|&s| f32::from_sample(s)).sum::<f32>() / frame.len() as f32
+}
+
+fn peak_sample_from_frame<T>(frame: &[T]) -> f32
+where
+    T: Sample,
+    f32: FromSample<T>,
+{
+    if frame.is_empty() {
+        return 0.0;
+    }
+
+    let average_abs = frame
+        .iter()
+        .map(|&s| f32::from_sample(s).abs())
+        .sum::<f32>()
+        / frame.len() as f32;
+    average_abs.clamp(0.0, 1.0)
+}
+
+fn update_peak(peak: &std::sync::atomic::AtomicU32, sample: f32) {
+    let current = f32::from_bits(peak.load(Ordering::Relaxed));
+    if sample > current {
+        peak.store(sample.to_bits(), Ordering::Relaxed);
+    }
+}
+
+fn build_microphone_test_stream<T>(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    peak: Arc<std::sync::atomic::AtomicU32>,
+) -> Result<cpal::Stream>
+where
+    T: Sample + SizedSample,
+    f32: FromSample<T>,
+{
+    let channels = config.channels as usize;
+
+    let stream = device.build_input_stream(
+        config,
+        move |data: &[T], _: &_| {
+            for frame in data.chunks(channels) {
+                update_peak(&peak, peak_sample_from_frame(frame));
+            }
+        },
+        |err| log::error!("Mic test stream error: {}", err),
         None,
     )?;
 
@@ -548,25 +623,25 @@ pub fn test_microphone(device_id: &str) -> Result<f32> {
         .context("Failed to get input config")?;
 
     let peak = Arc::new(std::sync::atomic::AtomicU32::new(0));
-    let peak_clone = Arc::clone(&peak);
-    let channels = config.channels() as usize;
+    let sample_format = config.sample_format();
 
-    let stream = device
-        .build_input_stream(
-            &config.into(),
-            move |data: &[f32], _: &_| {
-                for frame in data.chunks(channels) {
-                    let sample: f32 = frame.iter().map(|s| s.abs()).sum::<f32>() / channels as f32;
-                    let current = f32::from_bits(peak_clone.load(Ordering::Relaxed));
-                    if sample > current {
-                        peak_clone.store(sample.to_bits(), Ordering::Relaxed);
-                    }
-                }
-            },
-            |err| log::error!("Mic test stream error: {}", err),
-            None,
-        )
-        .context("Failed to build test stream")?;
+    let stream_config = config.into();
+    let stream = match sample_format {
+        SampleFormat::F32 => {
+            build_microphone_test_stream::<f32>(&device, &stream_config, Arc::clone(&peak))
+        }
+        SampleFormat::I16 => {
+            build_microphone_test_stream::<i16>(&device, &stream_config, Arc::clone(&peak))
+        }
+        SampleFormat::U16 => {
+            build_microphone_test_stream::<u16>(&device, &stream_config, Arc::clone(&peak))
+        }
+        _ => Err(anyhow::anyhow!(
+            "Unsupported sample format: {:?}",
+            sample_format
+        )),
+    }
+    .context("Failed to build test stream")?;
 
     stream.play().context("Failed to start mic test")?;
 
@@ -589,4 +664,44 @@ pub fn get_recordings_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf> {
 
     let recordings_dir = app_dir.join("recordings");
     Ok(recordings_dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mono_sample_from_frame_averages_f32_channels() {
+        assert_eq!(mono_sample_from_frame(&[0.5_f32, -0.25_f32]), 0.125);
+    }
+
+    #[test]
+    fn mono_sample_from_frame_converts_i16_channels() {
+        let expected = (f32::from_sample(i16::MAX) + f32::from_sample(i16::MIN)) / 2.0;
+
+        assert_eq!(mono_sample_from_frame(&[i16::MAX, i16::MIN]), expected);
+    }
+
+    #[test]
+    fn mono_sample_from_frame_converts_u16_channels() {
+        let expected = (f32::from_sample(u16::MAX) + f32::from_sample(0_u16)) / 2.0;
+
+        assert_eq!(mono_sample_from_frame(&[u16::MAX, 0_u16]), expected);
+    }
+
+    #[test]
+    fn peak_sample_from_frame_uses_absolute_mono_level() {
+        assert_eq!(peak_sample_from_frame(&[-0.75_f32, 0.25_f32]), 0.5);
+    }
+
+    #[test]
+    fn update_peak_keeps_largest_sample() {
+        let peak = std::sync::atomic::AtomicU32::new(0);
+
+        update_peak(&peak, 0.25);
+        update_peak(&peak, 0.1);
+        update_peak(&peak, 0.75);
+
+        assert_eq!(f32::from_bits(peak.load(Ordering::Relaxed)), 0.75);
+    }
 }
