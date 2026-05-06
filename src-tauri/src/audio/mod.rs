@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample};
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -360,48 +362,7 @@ fn run_single_recording_thread(
 ) -> Result<DeviceRecordingState> {
     let host = cpal::default_host();
 
-    // Find the device - try exact match first, then partial match
-    let device = if device_id_or_name == "default" {
-        host.default_input_device()
-            .context("No default input device available")?
-    } else {
-        let devices = host.input_devices().context("Failed to get devices")?;
-        let mut found_device = None;
-
-        for device in devices {
-            if let Ok(name) = device.name() {
-                // Exact match
-                if name == device_id_or_name {
-                    found_device = Some(device);
-                    break;
-                }
-                // Partial match for BlackHole
-                if device_id_or_name.contains("BlackHole")
-                    && (name.contains("BlackHole") || name.contains("BlackHole2ch"))
-                {
-                    found_device = Some(device);
-                    break;
-                }
-                // Partial match for microphone
-                if device_id_or_name.contains("microphone")
-                    && (name.to_lowercase().contains("microphone")
-                        || name.to_lowercase().contains("mic"))
-                {
-                    found_device = Some(device);
-                    break;
-                }
-            }
-        }
-
-        found_device
-            .or_else(|| host.default_input_device())
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "No audio input device available for '{}'",
-                    device_id_or_name
-                )
-            })?
-    };
+    let device = resolve_input_device(&host, device_id_or_name)?;
 
     let config = device
         .default_input_config()
@@ -571,7 +532,9 @@ where
 }
 
 /// List available audio input devices
-/// Returns vector of (id, name) tuples where id is the device name (for stable identification)
+/// Returns vector of (id, name) tuples. cpal does not expose a portable persistent
+/// hardware ID, so IDs are deterministic app keys derived from device names and
+/// duplicate occurrence numbers. Legacy stored display names still resolve.
 pub fn list_audio_devices() -> Result<Vec<(String, String)>> {
     let host = cpal::default_host();
     let devices = host
@@ -583,15 +546,105 @@ pub fn list_audio_devices() -> Result<Vec<(String, String)>> {
     // Add default device option
     device_list.push(("default".to_string(), "Default Microphone".to_string()));
 
+    let mut name_counts = HashMap::new();
     for device in devices {
         if let Ok(name) = device.name() {
-            // Use the actual device name as the ID for stable identification
-            // This ensures the stored device setting matches what cpal returns
-            device_list.push((name.clone(), name));
+            let id = make_audio_device_id(&name, next_device_occurrence(&mut name_counts, &name));
+            device_list.push((id, name));
         }
     }
 
     Ok(device_list)
+}
+
+fn resolve_input_device(host: &cpal::Host, device_id_or_name: &str) -> Result<cpal::Device> {
+    if device_id_or_name == "default" {
+        return host
+            .default_input_device()
+            .context("No default input device available");
+    }
+
+    let devices = collect_named_input_devices(host)?;
+    find_input_device(&devices, device_id_or_name)
+        .or_else(|| host.default_input_device())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "No audio input device available for '{}'",
+                device_id_or_name
+            )
+        })
+}
+
+fn collect_named_input_devices(host: &cpal::Host) -> Result<Vec<(String, String, cpal::Device)>> {
+    let mut devices_with_names = Vec::new();
+    let mut name_counts = HashMap::new();
+
+    for device in host.input_devices().context("Failed to get devices")? {
+        if let Ok(name) = device.name() {
+            let occurrence = next_device_occurrence(&mut name_counts, &name);
+            let id = make_audio_device_id(&name, occurrence);
+            devices_with_names.push((id, name, device));
+        }
+    }
+
+    Ok(devices_with_names)
+}
+
+fn find_input_device(
+    devices: &[(String, String, cpal::Device)],
+    device_id_or_name: &str,
+) -> Option<cpal::Device> {
+    devices
+        .iter()
+        .find(|(id, _, _)| id == device_id_or_name)
+        .or_else(|| {
+            devices
+                .iter()
+                .find(|(_, name, _)| name == device_id_or_name)
+        })
+        .or_else(|| {
+            devices
+                .iter()
+                .find(|(_, name, _)| is_blackhole_device_match(device_id_or_name, name))
+        })
+        .or_else(|| {
+            devices
+                .iter()
+                .find(|(_, name, _)| is_microphone_device_match(device_id_or_name, name))
+        })
+        .map(|(_, _, device)| device.clone())
+}
+
+fn next_device_occurrence(name_counts: &mut HashMap<String, usize>, name: &str) -> usize {
+    let entry = name_counts.entry(name.to_string()).or_insert(0);
+    let occurrence = *entry;
+    *entry += 1;
+    occurrence
+}
+
+fn make_audio_device_id(name: &str, occurrence: usize) -> String {
+    format!(
+        "coreaudio-input:{:016x}:{}",
+        stable_device_name_hash(name),
+        occurrence
+    )
+}
+
+fn stable_device_name_hash(name: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    name.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn is_blackhole_device_match(device_id_or_name: &str, candidate_name: &str) -> bool {
+    device_id_or_name.contains("BlackHole")
+        && (candidate_name.contains("BlackHole") || candidate_name.contains("BlackHole2ch"))
+}
+
+fn is_microphone_device_match(device_id_or_name: &str, candidate_name: &str) -> bool {
+    device_id_or_name.contains("microphone")
+        && (candidate_name.to_lowercase().contains("microphone")
+            || candidate_name.to_lowercase().contains("mic"))
 }
 
 /// Test a microphone by capturing a brief sample and returning the peak audio level.
@@ -603,19 +656,7 @@ pub fn test_microphone(device_id: &str) -> Result<f32> {
         host.default_input_device()
             .context("No default input device available")?
     } else {
-        let mut found = None;
-        for d in host.input_devices().context("Failed to get devices")? {
-            if let Ok(name) = d.name() {
-                if name == device_id {
-                    found = Some(d);
-                    break;
-                }
-            }
-        }
-        found.unwrap_or(
-            host.default_input_device()
-                .context("No default input device")?,
-        )
+        resolve_input_device(&host, device_id)?
     };
 
     let config = device
@@ -703,5 +744,44 @@ mod tests {
         update_peak(&peak, 0.75);
 
         assert_eq!(f32::from_bits(peak.load(Ordering::Relaxed)), 0.75);
+    }
+
+    #[test]
+    fn make_audio_device_id_is_stable_for_same_name_and_occurrence() {
+        let first = make_audio_device_id("Studio Display Microphone", 0);
+        let second = make_audio_device_id("Studio Display Microphone", 0);
+
+        assert_eq!(first, second);
+        assert!(first.starts_with("coreaudio-input:"));
+    }
+
+    #[test]
+    fn make_audio_device_id_disambiguates_duplicate_names() {
+        assert_ne!(
+            make_audio_device_id("USB Audio Device", 0),
+            make_audio_device_id("USB Audio Device", 1)
+        );
+    }
+
+    #[test]
+    fn next_device_occurrence_counts_per_name() {
+        let mut counts = HashMap::new();
+
+        assert_eq!(next_device_occurrence(&mut counts, "Mic"), 0);
+        assert_eq!(next_device_occurrence(&mut counts, "Mic"), 1);
+        assert_eq!(next_device_occurrence(&mut counts, "Other Mic"), 0);
+    }
+
+    #[test]
+    fn device_name_match_helpers_preserve_legacy_fallbacks() {
+        assert!(is_blackhole_device_match("BlackHole2ch", "BlackHole 2ch"));
+        assert!(is_microphone_device_match(
+            "external microphone",
+            "External Mic"
+        ));
+        assert!(!is_microphone_device_match(
+            "external microphone",
+            "Studio Speakers"
+        ));
     }
 }
