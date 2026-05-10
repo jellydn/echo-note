@@ -1,11 +1,17 @@
+use crate::diarization::{
+    download_diarization_model, get_diarization_model_info, DEFAULT_SIMILARITY_THRESHOLD,
+};
 use crate::{db, whisper};
 use crate::{ApiResponse, AppStateExt};
-use db::{create_transcript, get_setting, CreateTranscriptInput, DEFAULT_WHISPER_MODEL_SIZE};
+use db::{
+    create_transcript, get_setting, CreateTranscriptInput, DEFAULT_DIARIZATION_ENABLED,
+    DEFAULT_DIARIZATION_THRESHOLD, DEFAULT_WHISPER_MODEL_SIZE,
+};
 use serde::Serialize;
 use tauri::State;
 use whisper::{
-    download_whisper_model, get_models_info, is_model_downloaded, transcribe_audio, ModelInfo,
-    TranscriptSegment,
+    download_whisper_model, get_models_info, is_model_downloaded, transcribe_audio_with_options,
+    ModelInfo, TranscriptSegment, TranscriptionOptions,
 };
 
 #[derive(Serialize, Clone)]
@@ -33,6 +39,16 @@ pub struct WhisperModelInfoResponse {
     pub actual_size: Option<u64>,
 }
 
+#[derive(Serialize, Clone)]
+pub struct DiarizationModelStatusResponse {
+    pub id: String,
+    pub filename: String,
+    pub expected_size: u64,
+    pub is_downloaded: bool,
+    pub actual_size: Option<u64>,
+    pub model_path: Option<String>,
+}
+
 impl From<ModelInfo> for WhisperModelInfoResponse {
     fn from(info: ModelInfo) -> Self {
         Self {
@@ -56,8 +72,33 @@ pub async fn transcribe_audio_command(
         .await
         .map_err(|e| format!("Failed to get model size setting: {}", e))?;
 
+    let diarization_enabled = get_setting(
+        &state.db,
+        "diarization_enabled",
+        DEFAULT_DIARIZATION_ENABLED,
+    )
+    .await
+    .map_err(|e| format!("Failed to get diarization_enabled setting: {}", e))?
+    .trim()
+    .eq_ignore_ascii_case("true");
+
+    let diarization_threshold = get_setting(
+        &state.db,
+        "diarization_threshold",
+        DEFAULT_DIARIZATION_THRESHOLD,
+    )
+    .await
+    .map_err(|e| format!("Failed to get diarization_threshold setting: {}", e))?
+    .parse::<f32>()
+    .unwrap_or(DEFAULT_SIMILARITY_THRESHOLD);
+
+    let options = TranscriptionOptions {
+        diarization_enabled,
+        diarization_threshold,
+    };
+
     let result = tokio::task::spawn_blocking(move || {
-        transcribe_audio(&app_handle, &audio_path, &model_size)
+        transcribe_audio_with_options(&app_handle, &audio_path, &model_size, options)
     })
     .await
     .map_err(|e| format!("Transcription task failed: {}", e))?
@@ -151,4 +192,34 @@ pub async fn open_models_folder_command(
         .map_err(|e| format!("Failed to open folder: {}", e))?;
 
     Ok(ApiResponse::success(path_str))
+}
+
+#[tauri::command]
+pub async fn check_diarization_status_command(
+    app_handle: tauri::AppHandle,
+) -> Result<ApiResponse<DiarizationModelStatusResponse>, String> {
+    let info = get_diarization_model_info(&app_handle)
+        .map_err(|e| format!("Failed to check diarization model status: {}", e))?;
+
+    Ok(ApiResponse::success(DiarizationModelStatusResponse {
+        id: info.id,
+        filename: info.filename,
+        expected_size: info.expected_size,
+        is_downloaded: info.is_downloaded,
+        actual_size: info.actual_size,
+        model_path: info.path.map(|p| p.to_string_lossy().to_string()),
+    }))
+}
+
+#[tauri::command]
+pub async fn download_diarization_model_command(
+    app_handle: tauri::AppHandle,
+) -> Result<ApiResponse<String>, String> {
+    let model_path = download_diarization_model(&app_handle)
+        .await
+        .map_err(|e| format!("Failed to download diarization model: {}", e))?;
+
+    Ok(ApiResponse::success(
+        model_path.to_string_lossy().to_string(),
+    ))
 }

@@ -68,6 +68,54 @@ const copyToClipboard = async (text: string): Promise<boolean> => {
 	}
 };
 
+// Stable, accessible color palette for speaker badges. Cycles for >8 speakers.
+const SPEAKER_COLORS = [
+	"#2563eb", // blue
+	"#16a34a", // green
+	"#db2777", // pink
+	"#ea580c", // orange
+	"#7c3aed", // violet
+	"#0891b2", // cyan
+	"#ca8a04", // amber
+	"#dc2626", // red
+];
+
+const colorForSpeaker = (speaker: string, speakerIndex: Map<string, number>): string => {
+	let idx = speakerIndex.get(speaker);
+	if (idx === undefined) {
+		idx = speakerIndex.size;
+		speakerIndex.set(speaker, idx);
+	}
+	return SPEAKER_COLORS[idx % SPEAKER_COLORS.length];
+};
+
+interface ParsedSegment {
+	timestamp: string | null;
+	speaker: string | null;
+	text: string;
+}
+
+// Parse formatted transcript lines like "[MM:SS] Speaker A: hello".
+// Lines that don't match the expected shape are kept as plain text.
+const parseTranscriptContent = (content: string): ParsedSegment[] => {
+	const lineRegex = /^\[([^\]]+)\]\s*([^:]+?):\s*(.*)$/;
+	return content
+		.split("\n")
+		.map((raw) => raw.trim())
+		.filter((line) => line.length > 0)
+		.map((line) => {
+			const match = line.match(lineRegex);
+			if (!match) {
+				return { timestamp: null, speaker: null, text: line };
+			}
+			return {
+				timestamp: match[1].trim(),
+				speaker: match[2].trim(),
+				text: match[3].trim(),
+			};
+		});
+};
+
 export function MeetingDetailView({ meetingId, onBack }: MeetingDetailViewProps) {
 	const [meeting, setMeeting] = useState<Meeting | null>(null);
 	const [transcript, setTranscript] = useState<Transcript | null>(null);
@@ -402,7 +450,7 @@ export function MeetingDetailView({ meetingId, onBack }: MeetingDetailViewProps)
 
 						<div className="transcript-content">
 							{transcript ? (
-								<div className="transcript-text">{transcript.content}</div>
+								<TranscriptSegments content={transcript.content} />
 							) : (
 								<div className="no-content">
 									<p>No transcript available for this meeting.</p>
@@ -412,6 +460,56 @@ export function MeetingDetailView({ meetingId, onBack }: MeetingDetailViewProps)
 					</div>
 				</div>
 			</div>
+		</div>
+	);
+}
+
+// Renders a transcript with colored speaker badges. Falls back to a plain
+// pre-formatted block if no segment lines could be parsed (e.g. a legacy
+// transcript stored as a single blob).
+function TranscriptSegments({ content }: { content: string }) {
+	const segments = parseTranscriptContent(content);
+	const hasParsedSegments = segments.some((s) => s.speaker !== null);
+
+	if (!hasParsedSegments) {
+		return <div className="transcript-text">{content}</div>;
+	}
+
+	const speakerIndex = new Map<string, number>();
+
+	return (
+		<div className="transcript-segments">
+			{segments.map((segment, idx) => {
+				const color = segment.speaker
+					? colorForSpeaker(segment.speaker, speakerIndex)
+					: "transparent";
+				return (
+					// biome-ignore lint/suspicious/noArrayIndexKey: Static list from parsed content
+					<div key={idx} className="transcript-segment">
+						<div className="transcript-segment-meta">
+							{segment.timestamp && (
+								<span className="transcript-segment-timestamp">[{segment.timestamp}]</span>
+							)}
+							{segment.speaker && (
+								<span
+									className="transcript-segment-speaker"
+									style={{
+										backgroundColor: color,
+										color: "white",
+										padding: "2px 8px",
+										borderRadius: "4px",
+										fontSize: "0.8rem",
+										fontWeight: 600,
+									}}
+								>
+									{segment.speaker}
+								</span>
+							)}
+						</div>
+						<div className="transcript-segment-text">{segment.text}</div>
+					</div>
+				);
+			})}
 		</div>
 	);
 }

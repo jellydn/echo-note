@@ -4,6 +4,10 @@ use std::io::Write;
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::diarization::{
+    create_onnx_embedder, diarize, SegmentSpan, DEFAULT_SIMILARITY_THRESHOLD,
+};
+
 /// Whisper model sizes supported (name, filename, expected_bytes, display_label)
 pub const WHISPER_MODELS: &[(&str, &str, u64, &str)] = &[
     ("tiny", "ggml-tiny.bin", 78_000_000, "Tiny"),
@@ -264,11 +268,46 @@ pub struct TranscriptSegment {
     pub text: String,
 }
 
-/// Transcribe audio file using Whisper
+/// Options controlling the transcription pipeline.
+#[derive(Clone, Debug)]
+pub struct TranscriptionOptions {
+    /// Whether to run speaker diarization on the resulting segments.
+    pub diarization_enabled: bool,
+    /// Cosine-similarity threshold for the diarization clustering step.
+    pub diarization_threshold: f32,
+}
+
+impl Default for TranscriptionOptions {
+    fn default() -> Self {
+        Self {
+            diarization_enabled: true,
+            diarization_threshold: DEFAULT_SIMILARITY_THRESHOLD,
+        }
+    }
+}
+
+/// Transcribe audio file using Whisper with default options.
+#[allow(dead_code)]
 pub fn transcribe_audio(
     app_handle: &AppHandle,
     audio_path: &str,
     model_size: &str,
+) -> Result<TranscriptionResult> {
+    transcribe_audio_with_options(
+        app_handle,
+        audio_path,
+        model_size,
+        TranscriptionOptions::default(),
+    )
+}
+
+/// Transcribe audio file using Whisper, controlling pipeline options
+/// (e.g. whether to run speaker diarization).
+pub fn transcribe_audio_with_options(
+    app_handle: &AppHandle,
+    audio_path: &str,
+    model_size: &str,
+    options: TranscriptionOptions,
 ) -> Result<TranscriptionResult> {
     use hound::WavReader;
     use std::time::Instant;
@@ -421,6 +460,65 @@ pub fn transcribe_audio(
                 speaker: "Speaker 1".to_string(),
                 text: segment_text.to_string(),
             });
+        }
+    }
+
+    // Speaker diarization (best-effort: keep "Speaker 1" labels if anything goes wrong).
+    if options.diarization_enabled && !transcript_segments.is_empty() {
+        let _ = app_handle.emit(
+            "transcription-progress",
+            TranscriptionProgress {
+                percentage: 92.0,
+                status: "Identifying speakers...".to_string(),
+            },
+        );
+
+        let spans: Vec<SegmentSpan> = transcript_segments
+            .iter()
+            .map(|s| SegmentSpan {
+                start_seconds: s.start_seconds,
+                end_seconds: s.end_seconds,
+            })
+            .collect();
+
+        match create_onnx_embedder(app_handle) {
+            Ok(embedder) => match diarize(
+                &audio_data,
+                &spans,
+                &embedder,
+                options.diarization_threshold,
+            ) {
+                Ok(labels) if labels.len() == transcript_segments.len() => {
+                    // If only one speaker is detected, leave the default label so the UI
+                    // doesn't imply multi-speaker analysis happened on a monologue.
+                    let unique = labels
+                        .iter()
+                        .collect::<std::collections::HashSet<_>>()
+                        .len();
+                    if unique > 1 {
+                        for (segment, label) in transcript_segments.iter_mut().zip(labels.iter()) {
+                            segment.speaker = label.clone();
+                        }
+                        log::info!("Diarization detected {} speakers", unique);
+                    } else {
+                        log::info!("Diarization detected a single speaker; keeping default label");
+                    }
+                }
+                Ok(_) => {
+                    log::warn!(
+                        "Diarization returned a mismatched label count; keeping default speaker labels"
+                    );
+                }
+                Err(e) => {
+                    log::warn!("Diarization failed, keeping default speaker labels: {}", e);
+                }
+            },
+            Err(e) => {
+                log::warn!(
+                    "Diarization model unavailable, keeping default speaker labels: {}",
+                    e
+                );
+            }
         }
     }
 
