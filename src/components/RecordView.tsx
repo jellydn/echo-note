@@ -14,6 +14,7 @@ interface RecordingResponse {
 	file_path: string;
 	duration_seconds: number;
 	used_system_audio: boolean;
+	system_audio_error: string | null;
 }
 
 // Meeting response from Tauri
@@ -66,6 +67,7 @@ export function RecordView({ onMeetingCreated, onNavigateToSettings }: RecordVie
 		"idle",
 	);
 	const [recordingResult, setRecordingResult] = useState<RecordingResponse | null>(null);
+	const [systemAudioWarning, setSystemAudioWarning] = useState<string | null>(null);
 
 	// Processing state
 	const [processingStage, setProcessingStage] = useState<ProcessingStage>("idle");
@@ -266,6 +268,11 @@ export function RecordView({ onMeetingCreated, onNavigateToSettings }: RecordVie
 
 			if (response.success && response.data) {
 				setRecordingResult(response.data);
+				setSystemAudioWarning(
+					response.data.system_audio_error
+						? `System audio was not captured: ${response.data.system_audio_error}. The recording still includes microphone audio.`
+						: null,
+				);
 				// Set default title and show modal
 				setMeetingTitle(generateDefaultTitle());
 				setShowTitleModal(true);
@@ -324,6 +331,7 @@ export function RecordView({ onMeetingCreated, onNavigateToSettings }: RecordVie
 		setShowTitleModal(false);
 		setMeetingTitle("");
 		setRecordingResult(null);
+		setSystemAudioWarning(null);
 		setRecordingDuration(0);
 	};
 
@@ -533,6 +541,13 @@ export function RecordView({ onMeetingCreated, onNavigateToSettings }: RecordVie
 								{recordingResult.used_system_audio && (
 									<span className="system-audio-badge">System audio included</span>
 								)}
+							</div>
+						)}
+
+						{systemAudioWarning && (
+							<div className="record-error">
+								<span className="error-icon">⚠️</span>
+								<span>{systemAudioWarning}</span>
 							</div>
 						)}
 

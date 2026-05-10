@@ -5,12 +5,15 @@ use serde::Serialize;
 use tauri::State;
 use whisper::{
     download_whisper_model, get_models_info, is_model_downloaded, transcribe_audio, ModelInfo,
+    TranscriptSegment,
 };
 
 #[derive(Serialize, Clone)]
 pub struct TranscriptionResponse {
     pub transcript_id: i64,
     pub text: String,
+    pub formatted_text: String,
+    pub segments: Vec<TranscriptSegment>,
     pub duration_seconds: f64,
 }
 
@@ -62,7 +65,11 @@ pub async fn transcribe_audio_command(
 
     let transcript_input = CreateTranscriptInput {
         meeting_id,
-        content: result.text.clone(),
+        content: if result.formatted_text.trim().is_empty() {
+            result.text.clone()
+        } else {
+            result.formatted_text.clone()
+        },
     };
 
     let transcript_id = create_transcript(&state.db, transcript_input)
@@ -72,6 +79,8 @@ pub async fn transcribe_audio_command(
     Ok(ApiResponse::success(TranscriptionResponse {
         transcript_id,
         text: result.text,
+        formatted_text: result.formatted_text,
+        segments: result.segments,
         duration_seconds: result.duration_seconds,
     }))
 }

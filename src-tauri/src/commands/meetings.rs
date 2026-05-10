@@ -2,7 +2,7 @@ use crate::{ApiResponse, AppStateExt};
 use db::{
     create_meeting, delete_meeting, get_meeting, list_meetings, update_meeting, CreateMeetingInput,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use tauri::State;
 
 use crate::db;
@@ -10,9 +10,32 @@ use crate::db;
 #[derive(Deserialize)]
 pub struct CreateMeetingRequest {
     pub title: String,
-    pub date: String, // ISO 8601 format
+    #[serde(deserialize_with = "deserialize_meeting_date")]
+    pub date: chrono::DateTime<chrono::Utc>,
     pub duration_seconds: i64,
     pub audio_path: String,
+}
+
+fn deserialize_meeting_date<'de, D>(
+    deserializer: D,
+) -> Result<chrono::DateTime<chrono::Utc>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum MeetingDate {
+        Rfc3339(String),
+        UnixSeconds(i64),
+    }
+
+    match MeetingDate::deserialize(deserializer)? {
+        MeetingDate::Rfc3339(value) => chrono::DateTime::parse_from_rfc3339(&value)
+            .map(|date| date.with_timezone(&chrono::Utc))
+            .map_err(serde::de::Error::custom),
+        MeetingDate::UnixSeconds(value) => chrono::DateTime::from_timestamp(value, 0)
+            .ok_or_else(|| serde::de::Error::custom(format!("invalid Unix timestamp: {value}"))),
+    }
 }
 
 #[derive(Serialize, Clone)]
@@ -43,13 +66,9 @@ pub async fn create_meeting_command(
     state: State<'_, AppStateExt>,
     request: CreateMeetingRequest,
 ) -> Result<ApiResponse<MeetingResponse>, String> {
-    let date = chrono::DateTime::parse_from_rfc3339(&request.date)
-        .map_err(|e| format!("Invalid date format: {}", e))?
-        .with_timezone(&chrono::Utc);
-
     let input = CreateMeetingInput {
         title: request.title,
-        date,
+        date: request.date,
         duration_seconds: request.duration_seconds,
         audio_path: request.audio_path,
     };
@@ -146,5 +165,40 @@ pub async fn update_meeting_command(
             "Meeting with id {} not found",
             id
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_meeting_request_accepts_rfc3339_date() {
+        let request: CreateMeetingRequest = serde_json::from_str(
+            r#"{
+                "title": "Test Meeting",
+                "date": "2026-05-06T15:56:00.000Z",
+                "duration_seconds": 3,
+                "audio_path": "/tmp/recording.wav"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(request.date.to_rfc3339(), "2026-05-06T15:56:00+00:00");
+    }
+
+    #[test]
+    fn create_meeting_request_accepts_unix_seconds_for_compatibility() {
+        let request: CreateMeetingRequest = serde_json::from_str(
+            r#"{
+                "title": "Test Meeting",
+                "date": 1778082960,
+                "duration_seconds": 3,
+                "audio_path": "/tmp/recording.wav"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(request.date.to_rfc3339(), "2026-05-06T15:56:00+00:00");
     }
 }

@@ -251,7 +251,17 @@ pub struct TranscriptionProgress {
 #[derive(Clone, serde::Serialize)]
 pub struct TranscriptionResult {
     pub text: String,
+    pub formatted_text: String,
+    pub segments: Vec<TranscriptSegment>,
     pub duration_seconds: f64,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct TranscriptSegment {
+    pub start_seconds: f64,
+    pub end_seconds: f64,
+    pub speaker: String,
+    pub text: String,
 }
 
 /// Transcribe audio file using Whisper
@@ -316,33 +326,8 @@ pub fn transcribe_audio(
     );
 
     // Read samples and convert to mono f32 at 16kHz
-    let samples: Vec<f32> = reader
-        .samples::<i16>()
-        .filter_map(|s| s.ok())
-        .enumerate()
-        .map(|(i, sample)| {
-            // Convert to mono by averaging channels
-            if spec.channels > 1 && i % spec.channels as usize == 0 {
-                // This is the first channel of a frame
-                sample as f32 / 32768.0
-            } else if spec.channels > 1 {
-                // Skip additional channels for now (we'll average later)
-                0.0
-            } else {
-                sample as f32 / 32768.0
-            }
-        })
-        .collect();
-
-    // If stereo, we need to properly average
-    let audio_data: Vec<f32> = if spec.channels > 1 {
-        samples
-            .chunks(spec.channels as usize)
-            .map(|chunk| chunk.iter().sum::<f32>() / spec.channels as f32)
-            .collect()
-    } else {
-        samples
-    };
+    let samples: Vec<i16> = reader.samples::<i16>().filter_map(|s| s.ok()).collect();
+    let audio_data = pcm_i16_to_mono_f32(&samples, spec.channels);
 
     // Resample to 16kHz if needed
     let audio_data = if spec.sample_rate != 16000 {
@@ -373,6 +358,7 @@ pub fn transcribe_audio(
 
     // Process audio in chunks if needed (for very long files)
     let mut full_text = String::new();
+    let mut transcript_segments = Vec::new();
     let total_samples = audio_data.len();
     let chunk_size = MAX_AUDIO_SAMPLES;
 
@@ -408,8 +394,33 @@ pub fn transcribe_audio(
             let segment_text = state
                 .full_get_segment_text(i)
                 .map_err(|e| anyhow::anyhow!("Failed to get segment text: {:?}", e))?;
-            full_text.push_str(&segment_text);
+            let segment_text = segment_text.trim();
+            if segment_text.is_empty() {
+                continue;
+            }
+
+            let chunk_offset_seconds = (chunk_idx * chunk_size) as f64 / 16000.0;
+            let start_seconds = chunk_offset_seconds
+                + state
+                    .full_get_segment_t0(i)
+                    .map_err(|e| anyhow::anyhow!("Failed to get segment start time: {:?}", e))?
+                    as f64
+                    * 0.01;
+            let end_seconds = chunk_offset_seconds
+                + state
+                    .full_get_segment_t1(i)
+                    .map_err(|e| anyhow::anyhow!("Failed to get segment end time: {:?}", e))?
+                    as f64
+                    * 0.01;
+
+            full_text.push_str(segment_text);
             full_text.push(' ');
+            transcript_segments.push(TranscriptSegment {
+                start_seconds,
+                end_seconds,
+                speaker: "Speaker 1".to_string(),
+                text: segment_text.to_string(),
+            });
         }
     }
 
@@ -427,18 +438,52 @@ pub fn transcribe_audio(
 
     Ok(TranscriptionResult {
         text: full_text.trim().to_string(),
+        formatted_text: format_transcript_segments(&transcript_segments),
+        segments: transcript_segments,
         duration_seconds: duration,
     })
 }
 
+fn format_transcript_segments(segments: &[TranscriptSegment]) -> String {
+    segments
+        .iter()
+        .map(|segment| {
+            format!(
+                "[{}] {}: {}",
+                format_timestamp(segment.start_seconds),
+                segment.speaker,
+                segment.text
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_timestamp(seconds: f64) -> String {
+    let total_seconds = seconds.max(0.0).floor() as u64;
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let seconds = total_seconds % 60;
+
+    if hours > 0 {
+        format!("{hours:02}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes:02}:{seconds:02}")
+    }
+}
+
 /// Resample audio using linear interpolation
 fn resample_audio(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
+    if input.is_empty() {
+        return Vec::new();
+    }
+
     if from_rate == to_rate {
         return input.to_vec();
     }
 
     let ratio = to_rate as f64 / from_rate as f64;
-    let output_len = (input.len() as f64 * ratio) as usize;
+    let output_len = (input.len() as f64 * ratio).round().max(1.0) as usize;
     let mut output = Vec::with_capacity(output_len);
 
     for i in 0..output_len {
@@ -452,6 +497,21 @@ fn resample_audio(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     }
 
     output
+}
+
+fn pcm_i16_to_mono_f32(samples: &[i16], channels: u16) -> Vec<f32> {
+    let channels = usize::from(channels.max(1));
+
+    samples
+        .chunks(channels)
+        .map(|frame| {
+            frame
+                .iter()
+                .map(|sample| f32::from(*sample) / 32768.0)
+                .sum::<f32>()
+                / frame.len() as f32
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -475,5 +535,50 @@ mod tests {
         let input = vec![0.0, 0.5, 1.0, 0.5, 0.0];
         let output = resample_audio(&input, 16000, 8000);
         assert_eq!(output.len(), 3); // Approximately half the size
+    }
+
+    #[test]
+    fn test_resample_audio_empty_input() {
+        assert!(resample_audio(&[], 48000, 16000).is_empty());
+    }
+
+    #[test]
+    fn test_pcm_i16_to_mono_f32_averages_stereo_channels() {
+        let samples = vec![32767, 0, 0, -32768];
+
+        let mono = pcm_i16_to_mono_f32(&samples, 2);
+
+        assert!((mono[0] - 0.49998474).abs() < 0.00001);
+        assert!((mono[1] - -0.5).abs() < 0.00001);
+    }
+
+    #[test]
+    fn test_format_timestamp() {
+        assert_eq!(format_timestamp(0.0), "00:00");
+        assert_eq!(format_timestamp(65.9), "01:05");
+        assert_eq!(format_timestamp(3661.2), "01:01:01");
+    }
+
+    #[test]
+    fn test_format_transcript_segments() {
+        let segments = vec![
+            TranscriptSegment {
+                start_seconds: 0.0,
+                end_seconds: 1.5,
+                speaker: "Speaker 1".to_string(),
+                text: "Hello".to_string(),
+            },
+            TranscriptSegment {
+                start_seconds: 62.0,
+                end_seconds: 64.0,
+                speaker: "Speaker 1".to_string(),
+                text: "Follow up tomorrow".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            format_transcript_segments(&segments),
+            "[00:00] Speaker 1: Hello\n[01:02] Speaker 1: Follow up tomorrow"
+        );
     }
 }

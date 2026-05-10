@@ -275,6 +275,7 @@ export function MeetingDetailView({ meetingId, onBack }: MeetingDetailViewProps)
 									className="title-edit-button save"
 									onClick={handleTitleSave}
 									disabled={isSavingTitle}
+									aria-label="Save title"
 								>
 									✓
 								</button>
@@ -283,6 +284,7 @@ export function MeetingDetailView({ meetingId, onBack }: MeetingDetailViewProps)
 									className="title-edit-button cancel"
 									onClick={handleTitleCancel}
 									disabled={isSavingTitle}
+									aria-label="Cancel editing"
 								>
 									✕
 								</button>
@@ -324,6 +326,7 @@ export function MeetingDetailView({ meetingId, onBack }: MeetingDetailViewProps)
 											"summary",
 										)
 									}
+									aria-label="Copy summary"
 								>
 									{copiedSection === "summary" ? "✓ Copied" : "📋 Copy"}
 								</button>
@@ -390,6 +393,7 @@ export function MeetingDetailView({ meetingId, onBack }: MeetingDetailViewProps)
 									type="button"
 									className={`copy-button ${copiedSection === "transcript" ? "copied" : ""}`}
 									onClick={() => transcript && handleCopy(transcript.content, "transcript")}
+									aria-label="Copy transcript"
 								>
 									{copiedSection === "transcript" ? "✓ Copied" : "📋 Copy"}
 								</button>
