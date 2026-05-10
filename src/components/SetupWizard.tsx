@@ -54,21 +54,12 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 			);
 			setInstallResult(response.data);
 
-			// Wait a bit then recheck status
-			setTimeout(async () => {
-				await checkBlackHoleStatus();
-				if (response.data.success || response.data.method === "manual") {
-					// Move to next step after installation attempt
-					setTimeout(() => {
-						if (response.data.method === "manual") {
-							// Manual installation requires user to restart app
-							setCurrentStep("complete");
-						} else {
-							setCurrentStep("complete");
-						}
-					}, 2000);
-				}
-			}, 3000);
+			// The Tauri command is already async and waits for installation to complete,
+			// so we can recheck status and transition immediately.
+			await checkBlackHoleStatus();
+			if (response.data.success || response.data.method === "manual") {
+				setCurrentStep("complete");
+			}
 		} catch (err) {
 			console.error("Auto-install failed:", err);
 			setError(`Installation failed: ${err}`);

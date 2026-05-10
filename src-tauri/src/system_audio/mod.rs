@@ -256,13 +256,18 @@ pub fn install_blackhole_from_bundle(app_handle: &tauri::AppHandle) -> Result<()
     log::info!("Installing BlackHole from bundled package: {:?}", pkg_path);
 
     // Use macOS installer command with a privileged helper
-    // This will prompt the user for admin password via macOS UI
+    // This will prompt the user for admin password via macOS UI.
+    // Use AppleScript's `quoted form of` for proper shell escaping.
+    let escaped_path = pkg_path
+        .to_string_lossy()
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"");
     let status = Command::new("osascript")
         .args([
             "-e",
             &format!(
-                r#"do shell script "installer -pkg '{}' -target /" with administrator privileges"#,
-                pkg_path.to_string_lossy().replace("'", "'\"'\"'")
+                r#"do shell script "installer -pkg " & quoted form of "{}" & " -target /" with administrator privileges"#,
+                escaped_path
             ),
         ])
         .status()
