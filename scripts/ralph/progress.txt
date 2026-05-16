@@ -47,7 +47,7 @@
 - Quality checks passed:
   - TypeScript typecheck: `tsc --noEmit` ✓
   - Biome lint: `bun run lint` ✓
-  - Rust build: cargo permissions issue in env, code verified correct
+  - Rust build: `just check` was not completed in the original environment because Cargo cache permissions blocked the run; alternate verification was code review plus local TypeScript/Biome checks. `just check` must pass before merge.
 - **Learnings for future iterations:**
   - **First-launch pattern**: Settings-based state tracking (first_launch_completed boolean) is clean and survives app restarts
   - **SetupWizard as overlay**: Rendering wizard before main app shell keeps concerns separated

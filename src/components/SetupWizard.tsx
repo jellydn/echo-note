@@ -70,12 +70,12 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
 	const handleComplete = async () => {
 		try {
+			setError(null);
 			await invoke("complete_first_launch_setup_command");
 			onComplete();
 		} catch (err) {
 			console.error("Failed to complete setup:", err);
-			// Complete anyway - user can finish setup
-			onComplete();
+			setError(`Failed to save setup completion: ${err}`);
 		}
 	};
 

@@ -101,10 +101,14 @@ let resource_dir = app_handle.path().resource_dir()?;
 let pkg_path = resource_dir.join("resources").join("Installer.pkg");
 
 // Install with admin privileges via osascript
+let escaped_path = pkg_path
+  .to_string_lossy()
+  .replace("\\", "\\\\")
+  .replace("\"", "\\\"");
 Command::new("osascript")
   .args(["-e", &format!(
-    r#"do shell script "installer -pkg '{}' -target /" with administrator privileges"#,
-    pkg_path.to_string_lossy()
+    r#"do shell script "installer -pkg " & quoted form of "{}" & " -target /" with administrator privileges"#,
+    escaped_path
   )])
   .status()?;
 ```

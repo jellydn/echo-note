@@ -193,17 +193,19 @@ pub async fn auto_install_blackhole_command(
     app_handle: tauri::AppHandle,
     state: State<'_, AppStateExt>,
 ) -> Result<ApiResponse<BlackHoleInstallResponse>, String> {
-    let method = auto_install_blackhole(&app_handle).map_err(|e| {
-        format!(
-            "Auto-installation failed: {}. Please install manually from Settings.",
-            e
-        )
-    })?;
+    let install_result = auto_install_blackhole(&app_handle);
 
     // Mark that we've attempted BlackHole installation
     set_setting(&state.db, "blackhole_install_attempted", "true")
         .await
         .map_err(|e| format!("Failed to record installation attempt: {}", e))?;
+
+    let method = install_result.map_err(|e| {
+        format!(
+            "Auto-installation failed: {}. Please install manually from Settings.",
+            e
+        )
+    })?;
 
     let method_str = match method {
         BlackHoleInstallMethod::Bundled => "bundled",

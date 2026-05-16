@@ -345,6 +345,8 @@ Here is the transcript:
 
 /// Build the prompt for JSON meeting summarization with API providers.
 fn build_summary_json_prompt(transcript: &str) -> String {
+    let cleaned_transcript = clean_transcript(transcript);
+
     format!(
         r#"You are a meeting assistant that creates structured summaries from meeting transcripts.
 
@@ -361,7 +363,7 @@ Use empty arrays for sections with no content.
 Here is the transcript:
 
 {}"#,
-        transcript
+        cleaned_transcript
     )
 }
 
