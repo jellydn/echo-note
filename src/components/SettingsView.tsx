@@ -361,6 +361,12 @@ export function SettingsView() {
 		await saveSetting(SETTING_DIARIZATION_THRESHOLD, clamped.toString());
 	};
 
+	const commitDiarizationThresholdFromEvent = (
+		event: React.MouseEvent<HTMLInputElement> | React.KeyboardEvent<HTMLInputElement>,
+	) => {
+		handleDiarizationThresholdCommit(Number.parseFloat(event.currentTarget.value));
+	};
+
 	// Download whisper model
 	const downloadModel = async (modelSize: string) => {
 		setIsDownloading(modelSize);
@@ -799,16 +805,8 @@ export function SettingsView() {
 								step={0.05}
 								value={diarizationThreshold}
 								onChange={(e) => setDiarizationThreshold(Number.parseFloat(e.target.value))}
-								onMouseUp={(e) =>
-									handleDiarizationThresholdCommit(
-										Number.parseFloat((e.target as HTMLInputElement).value),
-									)
-								}
-								onKeyUp={(e) =>
-									handleDiarizationThresholdCommit(
-										Number.parseFloat((e.target as HTMLInputElement).value),
-									)
-								}
+								onMouseUp={commitDiarizationThresholdFromEvent}
+								onKeyUp={commitDiarizationThresholdFromEvent}
 								disabled={isSaving}
 							/>
 							<p className="settings-hint">

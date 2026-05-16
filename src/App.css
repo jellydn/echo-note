@@ -1386,7 +1386,7 @@ body,
 	font-size: 0.95rem;
 	line-height: 1.6;
 	color: #333;
-	word-wrap: break-word;
+	overflow-wrap: break-word;
 }
 
 @media (prefers-color-scheme: dark) {

@@ -16,9 +16,9 @@ Currently, EchoNote can transcribe meetings via Whisper and extract timestamped 
 
 ### Approach: Embedding-based Speaker Clustering
 
-Use a lightweight speaker embedding model (ECAPA-TDNN, ONNX format) to extract voice embeddings per Whisper segment, then cluster segments by speaker similarity.
+Use a lightweight voice embedding model (Qwen3-Voice-Embedding-12Hz-0.6B-onnx) to extract voice embeddings per Whisper segment, then cluster segments by speaker similarity.
 
-```
+```text
 Audio File
     │
     ├──► Whisper Transcription ──► Segments with timestamps + text
@@ -26,7 +26,7 @@ Audio File
     └──► Speaker Diarization Pipeline:
               │
               ├─ 1. For each segment: extract audio slice
-              ├─ 2. Compute speaker embedding (ECAPA-TDNN via ONNX)
+              ├─ 2. Compute speaker embedding (Qwen3 voice embedding model via ONNX)
               ├─ 3. Agglomerative clustering on embeddings
               └─ 4. Assign "Speaker A", "Speaker B", ... labels
                       │
@@ -62,10 +62,10 @@ New module with:
    - `diarize(audio_path, segments) -> Result<Vec<SegmentWithSpeaker>>`
 
 2. **`embedding.rs`** — Speaker embedding extraction
-   - Load ECAPA-TDNN ONNX model
+   - Load Qwen3-Voice-Embedding-12Hz-0.6B-onnx model
    - For each Whisper segment, extract audio slice from WAV file
    - Preprocess audio (normalize, resample to 16kHz if needed)
-   - Run ONNX inference → embedding vector (e.g., 192-dim)
+   - Run ONNX inference → embedding vector (1024 dimensions)
    - Return `Vec<Vec<f32>>` (one embedding per segment)
 
 3. **`clustering.rs`** — Speaker clustering
@@ -122,11 +122,11 @@ Add to `SettingsView.tsx`:
 
 ## Detailed Technical Design
 
-### ECAPA-TDNN ONNX Model
+### Qwen3 Voice Embedding ONNX Model
 
-- **Source**: Export from SpeechBrain (`speechbrain/spkrec-ecapa-voxceleb`)
+- **Source**: `Qwen3-Voice-Embedding-12Hz-0.6B-onnx`
 - **Input**: 16kHz mono audio, variable length (pad to ~3s or use full segment)
-- **Output**: 192-dimensional speaker embedding vector
+- **Output**: 1024-dimensional speaker embedding vector
 - **Size**: ~15-25MB
 - **Hosting**: Download from HuggingFace or bundled URLs
 
@@ -183,13 +183,13 @@ for (segment, labeled) in transcript_segments.iter_mut().zip(labeled_segments) {
 ### Database Changes
 
 The transcript `content` field already stores formatted text like:
-```
+```text
 [00:12] Speaker 1: Hello everyone
 [00:15] Speaker 2: Hi, thanks for joining
 ```
 
 With diarization this becomes:
-```
+```text
 [00:12] Speaker A: Hello everyone
 [00:15] Speaker B: Hi, thanks for joining
 ```
@@ -244,7 +244,7 @@ CREATE TABLE IF NOT EXISTS transcript_segments (
 ## Open Questions/Decisions
 
 1. **Model hosting**: Where to host the ONNX model? HuggingFace releases page? Bundled? User-downloaded?
-2. **Embedding dimension**: 192 (ECAPA-TDNN) vs 256 vs 512 — tradeoff between accuracy and speed
+2. **Embedding dimension**: 1024 (Qwen3 voice embedding model) vs smaller models — tradeoff between accuracy and speed
 3. **Segment padding**: How much audio context before/after each segment for reliable embeddings?
 4. **Real-time vs post-hoc**: Currently post-hoc (after recording). Future real-time?
 5. **Maximum speakers**: Should we limit clustering to N speakers (e.g., 4)?
@@ -267,7 +267,6 @@ CREATE TABLE IF NOT EXISTS transcript_segments (
 
 ## References
 
-- [ECAPA-TDNN paper](https://arxiv.org/abs/2005.07143)
-- [SpeechBrain ECAPA-TDNN](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb)
+- [Qwen3-Voice-Embedding-12Hz-0.6B-onnx](https://huggingface.co/marksverdhei/Qwen3-Voice-Embedding-12Hz-0.6B-onnx)
 - [ort crate](https://crates.io/crates/ort) — ONNX Runtime for Rust
 - [Whisper segment extraction (already implemented)](https://github.com/jellydn/echo-note/commit/289d9e5)

@@ -82,15 +82,23 @@ pub async fn transcribe_audio_command(
     .trim()
     .eq_ignore_ascii_case("true");
 
-    let diarization_threshold = get_setting(
+    let raw_diarization_threshold = get_setting(
         &state.db,
         "diarization_threshold",
         DEFAULT_DIARIZATION_THRESHOLD,
     )
     .await
-    .map_err(|e| format!("Failed to get diarization_threshold setting: {}", e))?
-    .parse::<f32>()
-    .unwrap_or(DEFAULT_SIMILARITY_THRESHOLD);
+    .map_err(|e| format!("Failed to get diarization_threshold setting: {}", e))?;
+    let diarization_threshold = raw_diarization_threshold
+        .parse::<f32>()
+        .unwrap_or_else(|_| {
+            log::warn!(
+                "Invalid diarization_threshold '{}', using {}",
+                raw_diarization_threshold,
+                DEFAULT_SIMILARITY_THRESHOLD
+            );
+            DEFAULT_SIMILARITY_THRESHOLD
+        });
 
     let options = TranscriptionOptions {
         diarization_enabled,

@@ -62,7 +62,8 @@ struct DiarizationDownloadProgress {
 /// segments.
 ///
 /// Returns a label per segment. If `segments` is empty, returns an empty
-/// `Vec`. If only one cluster is found, every label will be `"Speaker A"`.
+/// `Vec`. If only one cluster is found, the prior single-speaker convention
+/// (`"Speaker 1"`) is preserved.
 pub fn diarize<E: Embedder>(
     audio_16k_mono: &[f32],
     segments: &[SegmentSpan],
@@ -81,6 +82,13 @@ pub fn diarize<E: Embedder>(
     }
 
     let cluster_ids = cluster_speakers(&embeddings, threshold);
+    if cluster_ids
+        .first()
+        .is_some_and(|first| cluster_ids.iter().all(|id| id == first))
+    {
+        return Ok(vec!["Speaker 1".to_string(); segments.len()]);
+    }
+
     Ok(cluster_ids.into_iter().map(speaker_label).collect())
 }
 
@@ -96,12 +104,12 @@ pub fn get_diarization_model_path(app_handle: &AppHandle) -> Result<PathBuf> {
 
 pub fn get_diarization_model_info(app_handle: &AppHandle) -> Result<DiarizationModelInfo> {
     let path = get_diarization_model_path(app_handle)?;
-    let is_downloaded = path.exists();
-    let actual_size = if is_downloaded {
+    let actual_size = if path.exists() {
         fs::metadata(&path).ok().map(|m| m.len())
     } else {
         None
     };
+    let is_downloaded = actual_size == Some(DIARIZATION_MODEL_EXPECTED_SIZE);
 
     Ok(DiarizationModelInfo {
         id: DIARIZATION_MODEL_ID.to_string(),
@@ -123,8 +131,25 @@ pub fn create_onnx_embedder(app_handle: &AppHandle) -> Result<OnnxSpeakerEmbedde
 
 pub async fn download_diarization_model(app_handle: &AppHandle) -> Result<PathBuf> {
     let model_path = get_diarization_model_path(app_handle)?;
-    if model_path.exists() {
+    if get_diarization_model_info(app_handle)?.is_downloaded {
         return Ok(model_path);
+    }
+    if model_path.exists() {
+        fs::remove_file(&model_path).with_context(|| {
+            format!(
+                "Failed to remove invalid diarization model at {}",
+                model_path.display()
+            )
+        })?;
+    }
+    let partial_path = model_path.with_file_name(format!("{DIARIZATION_MODEL_FILENAME}.partial"));
+    if partial_path.exists() {
+        fs::remove_file(&partial_path).with_context(|| {
+            format!(
+                "Failed to remove partial diarization model at {}",
+                partial_path.display()
+            )
+        })?;
     }
 
     let client = reqwest::Client::builder()
@@ -141,16 +166,24 @@ pub async fn download_diarization_model(app_handle: &AppHandle) -> Result<PathBu
     let total_size = response
         .content_length()
         .unwrap_or(DIARIZATION_MODEL_EXPECTED_SIZE);
-    let mut file = fs::File::create(&model_path)
-        .with_context(|| format!("Failed to create file at {}", model_path.display()))?;
+    let mut file = fs::File::create(&partial_path)
+        .with_context(|| format!("Failed to create file at {}", partial_path.display()))?;
     let mut bytes_downloaded = 0u64;
     let mut last_percentage = 0.0f32;
     let mut stream = response.bytes_stream();
 
     while let Some(chunk_result) = stream.next().await {
-        let chunk = chunk_result.context("Failed to download diarization model chunk")?;
-        file.write_all(&chunk)
-            .context("Failed to write diarization model chunk")?;
+        let chunk = match chunk_result {
+            Ok(chunk) => chunk,
+            Err(e) => {
+                let _ = fs::remove_file(&partial_path);
+                return Err(e).context("Failed to download diarization model chunk");
+            }
+        };
+        if let Err(e) = file.write_all(&chunk) {
+            let _ = fs::remove_file(&partial_path);
+            return Err(e).context("Failed to write diarization model chunk");
+        }
         bytes_downloaded += chunk.len() as u64;
         let percentage = (bytes_downloaded as f64 / total_size as f64 * 100.0) as f32;
         if percentage - last_percentage >= 5.0 || percentage >= 99.0 {
@@ -176,6 +209,35 @@ pub async fn download_diarization_model(app_handle: &AppHandle) -> Result<PathBu
     if let Err(e) = app_handle.emit("diarization-download-progress", &progress) {
         log::warn!("Failed to emit final diarization download progress: {}", e);
     }
+
+    file.sync_all()
+        .context("Failed to flush diarization model download")?;
+    drop(file);
+
+    let actual_size = fs::metadata(&partial_path)
+        .with_context(|| {
+            format!(
+                "Failed to inspect downloaded diarization model at {}",
+                partial_path.display()
+            )
+        })?
+        .len();
+    if actual_size != DIARIZATION_MODEL_EXPECTED_SIZE {
+        let _ = fs::remove_file(&partial_path);
+        anyhow::bail!(
+            "Downloaded diarization model has size {}, expected {}",
+            actual_size,
+            DIARIZATION_MODEL_EXPECTED_SIZE
+        );
+    }
+
+    fs::rename(&partial_path, &model_path).with_context(|| {
+        format!(
+            "Failed to move diarization model from {} to {}",
+            partial_path.display(),
+            model_path.display()
+        )
+    })?;
 
     Ok(model_path)
 }
@@ -213,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    fn single_segment_yields_speaker_a() {
+    fn single_segment_preserves_single_speaker_label() {
         let audio = sine_segment(220.0, 1.0, TARGET_SAMPLE_RATE);
         let segments = vec![SegmentSpan {
             start_seconds: 0.0,
@@ -226,7 +288,7 @@ mod tests {
             DEFAULT_SIMILARITY_THRESHOLD,
         )
         .unwrap();
-        assert_eq!(labels, vec!["Speaker A".to_string()]);
+        assert_eq!(labels, vec!["Speaker 1".to_string()]);
     }
 
     #[test]
@@ -276,6 +338,6 @@ mod tests {
             end_seconds: 11.0,
         }];
         let labels = diarize(&audio, &segments, &AcousticFeatureEmbedder::new(), 0.75).unwrap();
-        assert_eq!(labels, vec!["Speaker A".to_string()]);
+        assert_eq!(labels, vec!["Speaker 1".to_string()]);
     }
 }

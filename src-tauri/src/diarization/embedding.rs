@@ -20,6 +20,7 @@ use ort::{
     session::{builder::GraphOptimizationLevel, Session},
     value::TensorRef,
 };
+use rustfft::{num_complex::Complex32, FftPlanner};
 use std::{path::Path, sync::Mutex};
 
 /// Sample rate the embedder expects (mono `f32` PCM, range `[-1.0, 1.0]`).
@@ -31,6 +32,8 @@ const MODEL_N_FFT: usize = 1024;
 const MODEL_HOP_LENGTH: usize = 256;
 const MODEL_MEL_BINS: usize = 128;
 const MODEL_MIN_AUDIO_SAMPLES: usize = MODEL_SAMPLE_RATE as usize;
+const MODEL_FMIN_HZ: f32 = 0.0;
+const MODEL_FMAX_HZ: f32 = 12_000.0;
 /// Pluggable embedder. Returning a fixed-dimension vector per call is a hard
 /// requirement — the clustering step assumes uniform dimensionality.
 pub trait Embedder: Send + Sync {
@@ -327,38 +330,109 @@ fn log_mel_spectrogram(audio_16k: &[f32]) -> Array3<f32> {
 
     let frame_count = ((audio.len().saturating_sub(MODEL_N_FFT)) / MODEL_HOP_LENGTH + 1).max(1);
     let mut features = Array3::<f32>::zeros((1, frame_count, MODEL_MEL_BINS));
+    let mel_filterbank = slaney_mel_filterbank(
+        MODEL_SAMPLE_RATE,
+        MODEL_N_FFT,
+        MODEL_MEL_BINS,
+        MODEL_FMIN_HZ,
+        MODEL_FMAX_HZ,
+    );
     let window: Vec<f32> = (0..MODEL_N_FFT)
         .map(|i| 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / MODEL_N_FFT as f32).cos())
         .collect();
+    let mut planner = FftPlanner::<f32>::new();
+    let fft = planner.plan_fft_forward(MODEL_N_FFT);
 
     for frame_idx in 0..frame_count {
         let start = frame_idx * MODEL_HOP_LENGTH;
-        let mut spectrum = vec![0.0f32; MODEL_N_FFT / 2 + 1];
-        for (bin, slot) in spectrum.iter_mut().enumerate() {
-            let mut re = 0.0f32;
-            let mut im = 0.0f32;
-            for (n, window_value) in window.iter().enumerate() {
-                let sample = audio.get(start + n).copied().unwrap_or(0.0) * window_value;
-                let angle =
-                    -2.0 * std::f32::consts::PI * bin as f32 * n as f32 / MODEL_N_FFT as f32;
-                re += sample * angle.cos();
-                im += sample * angle.sin();
-            }
-            *slot = re.mul_add(re, im * im);
-        }
+        let mut frame: Vec<Complex32> = (0..MODEL_N_FFT)
+            .map(|n| {
+                Complex32::new(
+                    audio.get(start + n).copied().unwrap_or(0.0) * window[n],
+                    0.0,
+                )
+            })
+            .collect();
+        fft.process(&mut frame);
+        let power_spectrum: Vec<f32> = frame[..MODEL_N_FFT / 2 + 1]
+            .iter()
+            .map(|value| value.norm_sqr())
+            .collect();
 
-        for mel_bin in 0..MODEL_MEL_BINS {
-            let start_bin = mel_bin * spectrum.len() / MODEL_MEL_BINS;
-            let end_bin = ((mel_bin + 1) * spectrum.len() / MODEL_MEL_BINS).max(start_bin + 1);
-            let energy = spectrum[start_bin..end_bin.min(spectrum.len())]
+        for (mel_bin, weights) in mel_filterbank.iter().enumerate() {
+            let energy = weights
                 .iter()
-                .sum::<f32>()
-                / (end_bin - start_bin) as f32;
+                .zip(power_spectrum.iter())
+                .map(|(weight, power)| weight * power)
+                .sum::<f32>();
             features[[0, frame_idx, mel_bin]] = energy.max(1e-5).ln();
         }
     }
 
     features
+}
+
+fn slaney_mel_filterbank(
+    sample_rate: u32,
+    n_fft: usize,
+    n_mels: usize,
+    f_min: f32,
+    f_max: f32,
+) -> Vec<Vec<f32>> {
+    let fft_bins = n_fft / 2 + 1;
+    let nyquist = sample_rate as f32 / 2.0;
+    let f_max = f_max.min(nyquist);
+    let min_mel = hz_to_slaney_mel(f_min);
+    let max_mel = hz_to_slaney_mel(f_max);
+    let mel_points: Vec<f32> = (0..n_mels + 2)
+        .map(|i| min_mel + (max_mel - min_mel) * i as f32 / (n_mels + 1) as f32)
+        .map(slaney_mel_to_hz)
+        .collect();
+    let fft_freqs: Vec<f32> = (0..fft_bins)
+        .map(|bin| bin as f32 * sample_rate as f32 / n_fft as f32)
+        .collect();
+
+    let mut filters = vec![vec![0.0f32; fft_bins]; n_mels];
+    for mel_bin in 0..n_mels {
+        let lower = mel_points[mel_bin];
+        let center = mel_points[mel_bin + 1];
+        let upper = mel_points[mel_bin + 2];
+        let enorm = 2.0 / (upper - lower).max(f32::EPSILON);
+
+        for (fft_bin, freq) in fft_freqs.iter().enumerate() {
+            let lower_slope = (*freq - lower) / (center - lower).max(f32::EPSILON);
+            let upper_slope = (upper - *freq) / (upper - center).max(f32::EPSILON);
+            filters[mel_bin][fft_bin] = lower_slope.min(upper_slope).max(0.0) * enorm;
+        }
+    }
+
+    filters
+}
+
+fn hz_to_slaney_mel(freq: f32) -> f32 {
+    let f_sp = 200.0 / 3.0;
+    let min_log_hz = 1_000.0;
+    let min_log_mel = min_log_hz / f_sp;
+    let logstep = 6.4_f32.ln() / 27.0;
+
+    if freq < min_log_hz {
+        freq / f_sp
+    } else {
+        min_log_mel + (freq / min_log_hz).ln() / logstep
+    }
+}
+
+fn slaney_mel_to_hz(mel: f32) -> f32 {
+    let f_sp = 200.0 / 3.0;
+    let min_log_hz = 1_000.0;
+    let min_log_mel = min_log_hz / f_sp;
+    let logstep = 6.4_f32.ln() / 27.0;
+
+    if mel < min_log_mel {
+        mel * f_sp
+    } else {
+        min_log_hz * (logstep * (mel - min_log_mel)).exp()
+    }
 }
 
 fn resample_linear(audio: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
