@@ -1,0 +1,12 @@
+- The goal audits every GitHub PR that is open against `main` at the start of the run.
+- Draft PRs are audited but are not merged.
+- A PR is merge-eligible only when it targets `main`, is not a draft, is mergeable, has no failing or pending required checks, and has no unresolved review or implementation blocker found during local review.
+- Renovate dependency PRs are reviewed as dependency updates, including lockfile changes, compatibility risk, and whether they overlap or supersede each other.
+- Feature PRs are reviewed against the relevant product behavior, repo conventions, and any existing project context that applies to the touched code.
+- Every merge candidate is verified locally with the smallest reliable command set for its change type, using repo quality gates when the blast radius warrants it.
+- `main` is updated before merging so merge decisions are made against current base state.
+- PRs with conflicts, draft status, failing verification, unresolved review concerns, or risky unsupported dependency jumps remain open.
+- Each unmerged PR has a concise blocker note recorded in the final audit result.
+- Each merged PR is merged into `main` using a non-destructive GitHub merge flow.
+- After merging one or more PRs, `main` is refreshed and the remaining open PR list is rechecked for changed mergeability.
+- The goal is done when all open PRs have either been merged or explicitly left open with the reason documented.

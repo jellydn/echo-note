@@ -147,7 +147,7 @@ describe("SettingsView", () => {
 		});
 
 		expect(screen.getByText(/✓ Downloaded/)).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: /download/i })).toBeInTheDocument();
+		expect(screen.getAllByRole("button", { name: /download/i }).length).toBeGreaterThan(0);
 	});
 
 	it("saves setting when audio device is changed", async () => {

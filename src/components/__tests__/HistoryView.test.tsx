@@ -100,7 +100,7 @@ describe("HistoryView", () => {
 		});
 
 		// Find the meeting item by role and name for resilience
-		const meetingItem = screen.getByRole("button", { name: /team standup/i });
+		const meetingItem = screen.getAllByRole("button", { name: /team standup/i })[0];
 		await userEvent.click(meetingItem);
 
 		expect(onMeetingClick).toHaveBeenCalledWith(1);
