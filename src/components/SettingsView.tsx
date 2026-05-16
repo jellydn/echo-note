@@ -55,6 +55,27 @@ const SETTING_API_ENDPOINT = "api_endpoint";
 const PROVIDER_LOCAL = "ollama";
 const PROVIDER_API = "api";
 
+const MEETING_APP_GUIDES = [
+	{
+		name: "Zoom",
+		outputSetting: "Settings > Audio > Speaker",
+		outputValue: "BlackHole 2ch or a Multi-Output Device that includes BlackHole",
+		inputSetting: "Settings > Audio > Microphone",
+	},
+	{
+		name: "Microsoft Teams",
+		outputSetting: "Settings > Devices > Speaker",
+		outputValue: "BlackHole 2ch or a Multi-Output Device that includes BlackHole",
+		inputSetting: "Settings > Devices > Microphone",
+	},
+	{
+		name: "Slack",
+		outputSetting: "Preferences > Audio & Video > Speaker",
+		outputValue: "BlackHole 2ch or a Multi-Output Device that includes BlackHole",
+		inputSetting: "Preferences > Audio & Video > Microphone",
+	},
+];
+
 // Model size type - driven by backend model list
 type ModelSize = string;
 
@@ -475,6 +496,32 @@ export function SettingsView() {
 								</div>
 							)}
 						</div>
+					</div>
+
+					<div className="settings-field">
+						{/* biome-ignore lint/a11y/noLabelWithoutControl: Label serves as section header */}
+						<label className="settings-label">Meeting App Routing</label>
+						<div className="meeting-app-grid">
+							{MEETING_APP_GUIDES.map((app) => (
+								<div key={app.name} className="meeting-app-card">
+									<div className="meeting-app-name">{app.name}</div>
+									<dl className="meeting-app-steps">
+										<div>
+											<dt>{app.outputSetting}</dt>
+											<dd>{app.outputValue}</dd>
+										</div>
+										<div>
+											<dt>{app.inputSetting}</dt>
+											<dd>Your preferred microphone</dd>
+										</div>
+									</dl>
+								</div>
+							))}
+						</div>
+						<p className="settings-hint">
+							Keep EchoNote's Audio Input Device set to your microphone. Meeting audio is captured
+							from the app speaker/output routed through BlackHole.
+						</p>
 					</div>
 				</section>
 

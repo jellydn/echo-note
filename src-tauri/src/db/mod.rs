@@ -80,6 +80,8 @@ pub const DEFAULT_WHISPER_MODEL_SIZE: &str = "small";
 pub const DEFAULT_LLM_PROVIDER: &str = "ollama";
 pub const DEFAULT_API_KEY: &str = "";
 pub const DEFAULT_API_ENDPOINT: &str = "https://api.openai.com/v1";
+pub const DEFAULT_FIRST_LAUNCH_COMPLETED: &str = "false";
+pub const DEFAULT_BLACKHOLE_INSTALL_ATTEMPTED: &str = "false";
 pub const DEFAULT_API_MODEL: &str = "gpt-4o-mini";
 
 /// Initialize the database pool and create tables if they don't exist
@@ -459,6 +461,11 @@ pub async fn init_default_settings(pool: &Pool<Sqlite>) -> Result<()> {
         ("llm_provider", DEFAULT_LLM_PROVIDER),
         ("api_key", DEFAULT_API_KEY),
         ("api_endpoint", DEFAULT_API_ENDPOINT),
+        ("first_launch_completed", DEFAULT_FIRST_LAUNCH_COMPLETED),
+        (
+            "blackhole_install_attempted",
+            DEFAULT_BLACKHOLE_INSTALL_ATTEMPTED,
+        ),
         ("api_model", DEFAULT_API_MODEL),
     ];
 

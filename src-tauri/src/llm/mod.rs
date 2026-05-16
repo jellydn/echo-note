@@ -176,6 +176,16 @@ pub async fn generate_summary(
         ollama_url,
         model
     );
+    log::debug!("Transcript length: {} chars", transcript.len());
+    log::debug!("Transcript preview: {:.200}", transcript);
+
+    // Check for empty or minimal transcript
+    let cleaned = transcript.trim();
+    if cleaned.is_empty() {
+        return Err(anyhow::anyhow!(
+            "Transcript is empty - no speech detected in the recording"
+        ));
+    }
 
     // Build the prompt for structured summarization
     let prompt = build_summary_prompt(transcript);
@@ -223,9 +233,30 @@ pub async fn generate_summary(
         .context("Failed to parse Ollama response")?;
 
     log::info!("Received response from Ollama, parsing summary...");
+    log::debug!(
+        "Ollama response length: {} chars",
+        ollama_response.response.len()
+    );
+    log::debug!(
+        "Ollama response preview: {:.200}",
+        &ollama_response.response
+    );
+
+    // Check for empty response
+    if ollama_response.response.trim().is_empty() {
+        return Err(anyhow::anyhow!("Ollama returned empty response - the model may not be loaded or the transcript was too short"));
+    }
 
     // Parse the structured response
     let summary = parse_summary_response(&ollama_response.response);
+
+    // Check if all sections are empty
+    if summary.key_points.is_empty()
+        && summary.decisions.is_empty()
+        && summary.action_items.is_empty()
+    {
+        return Err(anyhow::anyhow!("Failed to parse summary sections from model response. The model may not be following the expected format. Response preview: {:.200}", ollama_response.response));
+    }
 
     let duration = start_time.elapsed().as_secs_f64();
     log::info!("Summary generated in {:.2} seconds", duration);
@@ -238,8 +269,47 @@ pub async fn generate_summary(
     })
 }
 
+/// Filter out Whisper special tokens from transcript
+fn clean_transcript(transcript: &str) -> String {
+    // Remove common Whisper special tokens and non-speech markers
+    let special_tokens = [
+        "[_SOT_]",
+        "[_EOT_]",
+        "[_BEG_]",
+        "[_TT_",
+        "[_PREV_]",
+        "[_LANG_",
+        "[_TRANSCRIBE_]",
+        "[_TRANSLATE_]",
+        "[ Pause ]",
+        "[Typing]",
+        "[typing]",
+        "[SILENCE]",
+        "[NOISE]",
+        "[MUSIC]",
+        "[APPLAUSE]",
+        "[LAUGHTER]",
+        "[BLANK_AUDIO]",
+    ];
+
+    let mut cleaned = transcript.to_string();
+
+    // Remove tokens that appear in brackets
+    for token in special_tokens {
+        cleaned = cleaned.replace(token, "");
+    }
+
+    // Clean up multiple spaces and trim
+    cleaned = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    cleaned
+}
+
 /// Build the prompt for structured meeting summarization
 fn build_summary_prompt(transcript: &str) -> String {
+    // Clean special tokens before building prompt
+    let cleaned_transcript = clean_transcript(transcript);
+
     format!(
         r#"You are a meeting assistant that creates structured summaries from meeting transcripts.
 
@@ -269,12 +339,14 @@ If a section has no content, write "None" under that section.
 Here is the transcript:
 
 {}"#,
-        transcript
+        cleaned_transcript
     )
 }
 
 /// Build the prompt for JSON meeting summarization with API providers.
 fn build_summary_json_prompt(transcript: &str) -> String {
+    let cleaned_transcript = clean_transcript(transcript);
+
     format!(
         r#"You are a meeting assistant that creates structured summaries from meeting transcripts.
 
@@ -291,7 +363,7 @@ Use empty arrays for sections with no content.
 Here is the transcript:
 
 {}"#,
-        transcript
+        cleaned_transcript
     )
 }
 
@@ -691,5 +763,28 @@ action items:
     fn test_default_constants() {
         assert_eq!(DEFAULT_OLLAMA_URL, "http://localhost:11434");
         assert_eq!(DEFAULT_SUMMARY_MODEL, "llama3.2");
+    }
+
+    #[test]
+    fn test_clean_transcript() {
+        // Test removing special tokens
+        let dirty = "[_BEG_] Hello world [_EOT_]";
+        assert_eq!(clean_transcript(dirty), "Hello world");
+
+        // Test removing pause tokens
+        let with_pause = "[ Pause ] Discussing the project [ Pause ]";
+        assert_eq!(clean_transcript(with_pause), "Discussing the project");
+
+        // Test removing typing tokens
+        let with_typing = "[typing] Important point [typing]";
+        assert_eq!(clean_transcript(with_typing), "Important point");
+
+        // Test multiple spaces cleanup
+        let messy = "  Multiple    spaces   here  ";
+        assert_eq!(clean_transcript(messy), "Multiple spaces here");
+
+        // Test empty result when only special tokens
+        let only_special = "[_BEG_] [ Pause ] [typing] [_EOT_]";
+        assert_eq!(clean_transcript(only_special), "");
     }
 }

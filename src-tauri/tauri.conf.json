@@ -36,6 +36,9 @@
 			"icons/128x128@2x.png",
 			"icons/icon.icns",
 			"icons/icon.ico"
-		]
+		],
+		"resources": {
+			"resources/BlackHole2ch-0.6.0.pkg": "resources/BlackHole2ch-0.6.0.pkg"
+		}
 	}
 }

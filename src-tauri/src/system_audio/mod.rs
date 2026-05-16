@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::process::Command;
+use tauri::Manager;
 
 /// BlackHole virtual audio driver constants
 #[allow(dead_code)]
@@ -292,6 +293,124 @@ end tell"#,
 #[allow(dead_code)]
 pub fn should_use_blackhole() -> bool {
     is_blackhole_installed()
+}
+
+/// Path to the bundled BlackHole installer package
+pub const BUNDLED_PKG_NAME: &str = "BlackHole2ch-0.6.0.pkg";
+
+/// Check if the bundled BlackHole installer exists in resources
+pub fn is_bundled_installer_available(app_handle: &tauri::AppHandle) -> bool {
+    match get_bundled_pkg_path(app_handle) {
+        Ok(path) => path.exists(),
+        Err(_) => false,
+    }
+}
+
+/// Get the path to the bundled BlackHole installer
+fn get_bundled_pkg_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf> {
+    let resource_dir = app_handle
+        .path()
+        .resource_dir()
+        .context("Failed to get resource directory")?;
+    let pkg_path = resource_dir.join("resources").join(BUNDLED_PKG_NAME);
+    Ok(pkg_path)
+}
+
+/// Install BlackHole from the bundled .pkg installer
+/// Opens a privileged installer dialog for the user to complete installation
+pub fn install_blackhole_from_bundle(app_handle: &tauri::AppHandle) -> Result<()> {
+    let pkg_path = get_bundled_pkg_path(app_handle)?;
+
+    if !pkg_path.exists() {
+        return Err(anyhow::anyhow!(
+            "Bundled installer not found at {:?}. Falling back to download method.",
+            pkg_path
+        ));
+    }
+
+    log::info!("Installing BlackHole from bundled package: {:?}", pkg_path);
+
+    // Use macOS installer command with a privileged helper
+    // This will prompt the user for admin password via macOS UI.
+    // Use AppleScript's `quoted form of` for proper shell escaping.
+    let escaped_path = pkg_path
+        .to_string_lossy()
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"");
+    let status = Command::new("osascript")
+        .args([
+            "-e",
+            &format!(
+                r#"do shell script "installer -pkg " & quoted form of "{}" & " -target /" with administrator privileges"#,
+                escaped_path
+            ),
+        ])
+        .status()
+        .context("Failed to execute installer script")?;
+
+    if status.success() {
+        log::info!("BlackHole installation completed successfully");
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(
+            "Installation failed with status: {:?}. The user may have cancelled the installation.",
+            status
+        ))
+    }
+}
+
+/// Auto-install BlackHole using the best available method
+/// 1. Try bundled installer first (if available)
+/// 2. Fall back to Homebrew if available
+/// 3. Fall back to opening download page as last resort
+pub fn auto_install_blackhole(app_handle: &tauri::AppHandle) -> Result<BlackHoleInstallMethod> {
+    // Try bundled installer first
+    if is_bundled_installer_available(app_handle) {
+        log::info!("Attempting to install BlackHole from bundled package...");
+        match install_blackhole_from_bundle(app_handle) {
+            Ok(_) => return Ok(BlackHoleInstallMethod::Bundled),
+            Err(e) => {
+                log::warn!("Bundled installation failed: {}. Trying Homebrew...", e);
+            }
+        }
+    }
+
+    // Fall back to Homebrew
+    if is_homebrew_installed() {
+        log::info!("Attempting to install BlackHole via Homebrew...");
+        install_blackhole_via_homebrew()?;
+        return Ok(BlackHoleInstallMethod::Homebrew);
+    }
+
+    // Last resort: open download page
+    log::info!("No auto-install method available. Opening download page...");
+    install_blackhole_driver(app_handle)?;
+    Ok(BlackHoleInstallMethod::Manual)
+}
+
+/// Installation method used for BlackHole
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+pub enum BlackHoleInstallMethod {
+    Bundled,
+    Homebrew,
+    Manual,
+    #[allow(dead_code)]
+    AlreadyInstalled,
+}
+
+/// Check and install BlackHole if needed on first launch
+/// Returns the installation method used or AlreadyInstalled if already present
+#[allow(dead_code)]
+pub fn setup_blackhole_on_first_launch(
+    app_handle: &tauri::AppHandle,
+) -> Result<BlackHoleInstallMethod> {
+    if is_blackhole_installed() {
+        log::info!("BlackHole is already installed, skipping setup");
+        return Ok(BlackHoleInstallMethod::AlreadyInstalled);
+    }
+
+    log::info!("BlackHole not found, attempting auto-install...");
+    auto_install_blackhole(app_handle)
 }
 
 #[cfg(test)]

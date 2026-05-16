@@ -108,6 +108,10 @@ pub fn run() {
             install_blackhole_command,
             check_homebrew_status_command,
             install_blackhole_homebrew_command,
+            install_blackhole_bundled_command,
+            auto_install_blackhole_command,
+            complete_first_launch_setup_command,
+            check_first_launch_status_command,
             // Whisper models & transcription
             check_whisper_model_command,
             download_whisper_model_command,
