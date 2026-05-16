@@ -10,6 +10,13 @@ interface DownloadProgress {
 	percentage: number;
 }
 
+interface DiarizationDownloadProgress {
+	model_id: string;
+	bytes_downloaded: number;
+	total_bytes: number;
+	percentage: number;
+}
+
 // Tauri API response wrapper
 interface ApiResponse<T> {
 	success: boolean;
@@ -32,6 +39,15 @@ interface WhisperModelInfo {
 	actual_size: number | null;
 }
 
+interface DiarizationModelStatus {
+	id: string;
+	filename: string;
+	expected_size: number;
+	is_downloaded: boolean;
+	actual_size: number | null;
+	model_path: string | null;
+}
+
 // Ollama status
 interface OllamaStatusResponse {
 	available: boolean;
@@ -50,6 +66,10 @@ const SETTING_WHISPER_MODEL_SIZE = "whisper_model_size";
 const SETTING_LLM_PROVIDER = "llm_provider";
 const SETTING_API_KEY = "api_key";
 const SETTING_API_ENDPOINT = "api_endpoint";
+const SETTING_DIARIZATION_ENABLED = "diarization_enabled";
+const SETTING_DIARIZATION_THRESHOLD = "diarization_threshold";
+
+const DEFAULT_DIARIZATION_THRESHOLD = 0.75;
 
 // Provider options
 const PROVIDER_LOCAL = "ollama";
@@ -86,6 +106,10 @@ export function SettingsView() {
 	const [llmProvider, setLlmProvider] = useState<string>(PROVIDER_LOCAL);
 	const [apiKey, setApiKey] = useState<string>("");
 	const [apiEndpoint, setApiEndpoint] = useState<string>("");
+	const [diarizationEnabled, setDiarizationEnabled] = useState<boolean>(true);
+	const [diarizationThreshold, setDiarizationThreshold] = useState<number>(
+		DEFAULT_DIARIZATION_THRESHOLD,
+	);
 
 	// UI state
 	const [audioDevices, setAudioDevices] = useState<AudioDeviceInfo[]>([]);
@@ -99,10 +123,16 @@ export function SettingsView() {
 	const [hasHomebrew, setHasHomebrew] = useState<boolean>(false);
 	const [isInstallingBlackhole, setIsInstallingBlackhole] = useState(false);
 	const [isDownloading, setIsDownloading] = useState<string | null>(null);
+	const [diarizationModelStatus, setDiarizationModelStatus] =
+		useState<DiarizationModelStatus | null>(null);
+	const [isDownloadingDiarizationModel, setIsDownloadingDiarizationModel] = useState(false);
 
 	// Download progress state
 	const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
+	const [diarizationDownloadProgress, setDiarizationDownloadProgress] =
+		useState<DiarizationDownloadProgress | null>(null);
 	const unlistenRef = useRef<UnlistenFn | null>(null);
+	const diarizationUnlistenRef = useRef<UnlistenFn | null>(null);
 
 	// Fetch all settings and data on mount
 	const loadSettings = useCallback(async () => {
@@ -124,6 +154,13 @@ export function SettingsView() {
 			);
 			if (modelsResponse.success && modelsResponse.data) {
 				setModelInfo(modelsResponse.data);
+			}
+
+			const diarizationStatusResponse = await invoke<ApiResponse<DiarizationModelStatus>>(
+				"check_diarization_status_command",
+			);
+			if (diarizationStatusResponse.success && diarizationStatusResponse.data) {
+				setDiarizationModelStatus(diarizationStatusResponse.data);
 			}
 
 			// Fetch current settings
@@ -160,6 +197,24 @@ export function SettingsView() {
 			});
 			if (apiEndpointResponse.success && apiEndpointResponse.data) {
 				setApiEndpoint(apiEndpointResponse.data);
+			}
+
+			const diarizationEnabledResponse = await invoke<ApiResponse<string>>("get_setting_command", {
+				request: { key: SETTING_DIARIZATION_ENABLED },
+			});
+			if (diarizationEnabledResponse.success && diarizationEnabledResponse.data) {
+				setDiarizationEnabled(diarizationEnabledResponse.data.trim().toLowerCase() === "true");
+			}
+
+			const diarizationThresholdResponse = await invoke<ApiResponse<string>>(
+				"get_setting_command",
+				{ request: { key: SETTING_DIARIZATION_THRESHOLD } },
+			);
+			if (diarizationThresholdResponse.success && diarizationThresholdResponse.data) {
+				const parsed = Number.parseFloat(diarizationThresholdResponse.data);
+				if (Number.isFinite(parsed)) {
+					setDiarizationThreshold(parsed);
+				}
 			}
 
 			// Check Ollama status
@@ -226,6 +281,38 @@ export function SettingsView() {
 		};
 	}, []);
 
+	useEffect(() => {
+		const setupListener = async () => {
+			const unlisten = await listen<DiarizationDownloadProgress>(
+				"diarization-download-progress",
+				(event) => {
+					setDiarizationDownloadProgress(event.payload);
+					if (event.payload.percentage >= 100) {
+						setTimeout(async () => {
+							const response = await invoke<ApiResponse<DiarizationModelStatus>>(
+								"check_diarization_status_command",
+							);
+							if (response.success && response.data) {
+								setDiarizationModelStatus(response.data);
+							}
+							setIsDownloadingDiarizationModel(false);
+							setDiarizationDownloadProgress(null);
+						}, 500);
+					}
+				},
+			);
+			diarizationUnlistenRef.current = unlisten;
+		};
+
+		setupListener();
+
+		return () => {
+			if (diarizationUnlistenRef.current) {
+				diarizationUnlistenRef.current();
+			}
+		};
+	}, []);
+
 	// Save a setting value
 	const saveSetting = async (key: string, value: string) => {
 		setIsSaving(true);
@@ -282,6 +369,25 @@ export function SettingsView() {
 		await saveSetting(SETTING_API_ENDPOINT, endpoint);
 	};
 
+	// Handle diarization enable/disable
+	const handleDiarizationToggle = async (enabled: boolean) => {
+		setDiarizationEnabled(enabled);
+		await saveSetting(SETTING_DIARIZATION_ENABLED, enabled ? "true" : "false");
+	};
+
+	// Handle diarization threshold change (debounced via blur/commit)
+	const handleDiarizationThresholdCommit = async (value: number) => {
+		const clamped = Math.min(0.95, Math.max(0.4, value));
+		setDiarizationThreshold(clamped);
+		await saveSetting(SETTING_DIARIZATION_THRESHOLD, clamped.toString());
+	};
+
+	const commitDiarizationThresholdFromEvent = (
+		event: React.MouseEvent<HTMLInputElement> | React.KeyboardEvent<HTMLInputElement>,
+	) => {
+		handleDiarizationThresholdCommit(Number.parseFloat(event.currentTarget.value));
+	};
+
 	// Download whisper model
 	const downloadModel = async (modelSize: string) => {
 		setIsDownloading(modelSize);
@@ -315,6 +421,39 @@ export function SettingsView() {
 			setError(msg);
 		} finally {
 			setIsDownloading(null);
+		}
+	};
+
+	const downloadDiarizationModel = async () => {
+		setIsDownloadingDiarizationModel(true);
+		setError(null);
+		setSuccessMessage(null);
+
+		try {
+			const response = await invoke<ApiResponse<string>>("download_diarization_model_command");
+
+			if (response.success && response.data) {
+				const statusResponse = await invoke<ApiResponse<DiarizationModelStatus>>(
+					"check_diarization_status_command",
+				);
+				if (statusResponse.success && statusResponse.data) {
+					setDiarizationModelStatus(statusResponse.data);
+				}
+				setSuccessMessage("Diarization model downloaded successfully");
+				setTimeout(() => setSuccessMessage(null), 3000);
+			} else {
+				setError(response.error || "Failed to download diarization model");
+			}
+		} catch (err) {
+			const msg =
+				err instanceof Error
+					? err.message
+					: typeof err === "string"
+						? err
+						: "Failed to download diarization model";
+			setError(msg);
+		} finally {
+			setIsDownloadingDiarizationModel(false);
 		}
 	};
 
@@ -627,6 +766,102 @@ export function SettingsView() {
 							</a>
 						</div>
 					</div>
+				</section>
+
+				{/* Speaker Diarization Settings */}
+				<section className="settings-section">
+					<h3 className="settings-section-title">Speaker Diarization</h3>
+
+					<div className="settings-field">
+						<div className="model-option selected">
+							<div className="model-option-info">
+								<div className="model-option-label">
+									<span className="model-name">ECAPA-TDNN speaker model</span>
+									<span className="model-size">
+										{formatFileSize(diarizationModelStatus?.expected_size ?? 9_337_463)}
+									</span>
+								</div>
+							</div>
+							{diarizationModelStatus?.is_downloaded ? (
+								<span className="model-status downloaded">✓ Downloaded</span>
+							) : isDownloadingDiarizationModel ? (
+								<div className="model-download-progress">
+									<div className="progress-bar">
+										<div
+											className="progress-fill"
+											style={{ width: `${diarizationDownloadProgress?.percentage ?? 0}%` }}
+										/>
+									</div>
+									<span className="progress-text">
+										{Math.round(diarizationDownloadProgress?.percentage ?? 0)}%
+									</span>
+								</div>
+							) : (
+								<button
+									type="button"
+									className="model-download-button"
+									onClick={downloadDiarizationModel}
+									disabled={isDownloading !== null || isSaving}
+								>
+									Download
+								</button>
+							)}
+						</div>
+						{!diarizationModelStatus?.is_downloaded && (
+							<div className="model-prompt">
+								<span className="prompt-icon">📥</span>
+								<span>
+									<strong>No diarization model downloaded yet.</strong> Download it to identify
+									speakers during transcription.
+								</span>
+							</div>
+						)}
+					</div>
+
+					<div className="settings-field">
+						<label
+							htmlFor="diarization-enabled"
+							className="settings-label"
+							style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+						>
+							<input
+								type="checkbox"
+								id="diarization-enabled"
+								checked={diarizationEnabled}
+								onChange={(e) => handleDiarizationToggle(e.target.checked)}
+								disabled={isSaving}
+							/>
+							<span>Identify speakers in transcripts</span>
+						</label>
+						<p className="settings-hint">
+							Groups transcript segments by voice and labels them "Speaker A", "Speaker B", etc.
+							Runs locally after transcription.
+						</p>
+					</div>
+
+					{diarizationEnabled && (
+						<div className="settings-field">
+							<label htmlFor="diarization-threshold" className="settings-label">
+								Cluster sensitivity ({diarizationThreshold.toFixed(2)})
+							</label>
+							<input
+								type="range"
+								id="diarization-threshold"
+								min={0.4}
+								max={0.95}
+								step={0.05}
+								value={diarizationThreshold}
+								onChange={(e) => setDiarizationThreshold(Number.parseFloat(e.target.value))}
+								onMouseUp={commitDiarizationThresholdFromEvent}
+								onKeyUp={commitDiarizationThresholdFromEvent}
+								disabled={isSaving}
+							/>
+							<p className="settings-hint">
+								Higher values create more distinct speakers (stricter matching); lower values merge
+								similar voices.
+							</p>
+						</div>
+					)}
 				</section>
 
 				{/* LLM Provider Settings */}

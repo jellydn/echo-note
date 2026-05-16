@@ -83,6 +83,8 @@ pub const DEFAULT_API_ENDPOINT: &str = "https://api.openai.com/v1";
 pub const DEFAULT_FIRST_LAUNCH_COMPLETED: &str = "false";
 pub const DEFAULT_BLACKHOLE_INSTALL_ATTEMPTED: &str = "false";
 pub const DEFAULT_API_MODEL: &str = "gpt-4o-mini";
+pub const DEFAULT_DIARIZATION_ENABLED: &str = "true";
+pub const DEFAULT_DIARIZATION_THRESHOLD: &str = "0.75";
 
 /// Initialize the database pool and create tables if they don't exist
 pub async fn init_db(app_handle: &tauri::AppHandle) -> Result<Pool<Sqlite>> {
@@ -467,6 +469,8 @@ pub async fn init_default_settings(pool: &Pool<Sqlite>) -> Result<()> {
             DEFAULT_BLACKHOLE_INSTALL_ATTEMPTED,
         ),
         ("api_model", DEFAULT_API_MODEL),
+        ("diarization_enabled", DEFAULT_DIARIZATION_ENABLED),
+        ("diarization_threshold", DEFAULT_DIARIZATION_THRESHOLD),
     ];
 
     for (key, default_value) in &defaults {

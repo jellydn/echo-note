@@ -1,6 +1,7 @@
 mod audio;
 mod commands;
 pub mod db;
+mod diarization;
 mod llm;
 mod system_audio;
 mod whisper;
@@ -117,6 +118,8 @@ pub fn run() {
             download_whisper_model_command,
             list_whisper_models_command,
             open_models_folder_command,
+            check_diarization_status_command,
+            download_diarization_model_command,
             transcribe_audio_command,
             // LLM / summaries
             check_ollama_status_command,
