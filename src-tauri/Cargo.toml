@@ -35,5 +35,5 @@ whisper-rs = "0.13"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 ort = "=2.0.0-rc.10"
-ndarray = "0.16"
+ndarray = "0.17"
 rustfft = "6"
