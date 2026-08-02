@@ -40,7 +40,8 @@ const formatDate = (dateStr: string): string => {
 		hour: "2-digit",
 		minute: "2-digit",
 	});
-};	export function HistoryView({ onMeetingClick, onDeleteMeeting }: HistoryViewProps) {
+};
+export function HistoryView({ onMeetingClick, onDeleteMeeting }: HistoryViewProps) {
 	const [meetings, setMeetings] = useState<Meeting[]>([]);
 	const [isLoading, setIsLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
