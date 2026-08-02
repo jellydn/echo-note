@@ -627,6 +627,102 @@ pub fn list_audio_devices() -> Result<Vec<(String, String)>> {
     Ok(device_list)
 }
 
+/// Stable, human-readable label for a cpal sample format.
+///
+/// Used by the hardware diagnostics surface so the test matrix can report
+/// sample formats consistently across machines and macOS versions.
+pub fn sample_format_label(format: SampleFormat) -> &'static str {
+    match format {
+        SampleFormat::F32 => "f32",
+        SampleFormat::F64 => "f64",
+        SampleFormat::I8 => "i8",
+        SampleFormat::I16 => "i16",
+        SampleFormat::I32 => "i32",
+        SampleFormat::I64 => "i64",
+        SampleFormat::U8 => "u8",
+        SampleFormat::U16 => "u16",
+        SampleFormat::U32 => "u32",
+        SampleFormat::U64 => "u64",
+        // SampleFormat is #[non_exhaustive]; unknown formats must not panic.
+        _ => "unknown",
+    }
+}
+
+/// Diagnostic description of a single input device.
+#[derive(Debug, Clone)]
+pub struct DeviceDiagnostic {
+    pub id: String,
+    pub name: String,
+    pub sample_format: Option<String>,
+    pub channels: Option<u16>,
+    pub sample_rate: Option<u32>,
+}
+
+/// Snapshot of the host audio environment for reproducible hardware testing.
+#[derive(Debug, Clone)]
+pub struct AudioDiagnostics {
+    pub default_device: Option<String>,
+    pub devices: Vec<DeviceDiagnostic>,
+    pub blackhole_installed: bool,
+    pub blackhole_device: Option<String>,
+}
+
+/// Enumerate every input device with its default input config.
+///
+/// Falls back gracefully when a device exposes no default config so one broken
+/// device cannot abort the whole diagnostics report.
+pub fn collect_device_diagnostics(host: &cpal::Host) -> Result<Vec<DeviceDiagnostic>> {
+    let mut name_counts = HashMap::new();
+    let mut diagnostics = Vec::new();
+
+    for device in host.input_devices().context("Failed to access input devices")? {
+        let name = device.name().unwrap_or_else(|_| "Unknown device".to_string());
+        let id = make_audio_device_id(&name, next_device_occurrence(&mut name_counts, &name));
+
+        let (sample_format, channels, sample_rate) = match device.default_input_config() {
+            Ok(config) => (
+                Some(sample_format_label(config.sample_format()).to_string()),
+                Some(config.channels()),
+                Some(config.sample_rate().0),
+            ),
+            Err(_) => (None, None, None),
+        };
+
+        diagnostics.push(DeviceDiagnostic {
+            id,
+            name,
+            sample_format,
+            channels,
+            sample_rate,
+        });
+    }
+
+    Ok(diagnostics)
+}
+
+/// Collect the full audio environment snapshot for diagnostics.
+pub fn get_audio_diagnostics() -> Result<AudioDiagnostics> {
+    let host = cpal::default_host();
+    let default_device = host
+        .default_input_device()
+        .and_then(|device| device.name().ok());
+
+    let devices = collect_device_diagnostics(&host)?;
+    let blackhole_installed = crate::system_audio::is_blackhole_installed();
+    let blackhole_device = if blackhole_installed {
+        crate::system_audio::get_blackhole_device_name()
+    } else {
+        None
+    };
+
+    Ok(AudioDiagnostics {
+        default_device,
+        devices,
+        blackhole_installed,
+        blackhole_device,
+    })
+}
+
 fn resolve_input_device(host: &cpal::Host, device_id_or_name: &str) -> Result<cpal::Device> {
     if device_id_or_name == "default" {
         return host
@@ -897,5 +993,22 @@ mod tests {
             "external microphone",
             "Studio Speakers"
         ));
+    }
+
+    #[test]
+    fn sample_format_label_maps_supported_formats() {
+        assert_eq!(sample_format_label(SampleFormat::F32), "f32");
+        assert_eq!(sample_format_label(SampleFormat::I16), "i16");
+        assert_eq!(sample_format_label(SampleFormat::U16), "u16");
+        assert_eq!(sample_format_label(SampleFormat::F64), "f64");
+        assert_eq!(sample_format_label(SampleFormat::I32), "i32");
+    }
+
+    #[test]
+    fn sample_format_label_is_stable_across_unknown_formats() {
+        // The non-exhaustive enum must never panic in diagnostics.
+        assert_eq!(sample_format_label(SampleFormat::U64), "u64");
+        assert_eq!(sample_format_label(SampleFormat::I8), "i8");
+        assert_eq!(sample_format_label(SampleFormat::U8), "u8");
     }
 }

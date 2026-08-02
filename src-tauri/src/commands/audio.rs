@@ -44,6 +44,23 @@ pub struct BlackHoleStatusResponse {
     pub device_name: Option<String>,
 }
 
+#[derive(Serialize, Clone)]
+pub struct AudioDeviceDiagnosticResponse {
+    pub id: String,
+    pub name: String,
+    pub sample_format: Option<String>,
+    pub channels: Option<u16>,
+    pub sample_rate: Option<u32>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct AudioDiagnosticsResponse {
+    pub default_device: Option<String>,
+    pub devices: Vec<AudioDeviceDiagnosticResponse>,
+    pub blackhole_installed: bool,
+    pub blackhole_device: Option<String>,
+}
+
 #[tauri::command]
 pub async fn start_recording_command(
     state: State<'_, AppStateExt>,
@@ -133,6 +150,35 @@ pub async fn check_blackhole_status_command() -> Result<ApiResponse<BlackHoleSta
     Ok(ApiResponse::success(BlackHoleStatusResponse {
         installed,
         device_name,
+    }))
+}
+
+/// Collect a reproducible snapshot of the host audio environment.
+///
+/// Used by the hardware test matrix (issue #37) so each scenario can be
+/// reproduced against a known device/sample-format/BlackHole state.
+#[tauri::command]
+pub async fn get_audio_diagnostics_command() -> Result<ApiResponse<AudioDiagnosticsResponse>, String> {
+    let diagnostics = audio::get_audio_diagnostics()
+        .map_err(|e| format!("Failed to collect audio diagnostics: {}", e))?;
+
+    let devices: Vec<AudioDeviceDiagnosticResponse> = diagnostics
+        .devices
+        .into_iter()
+        .map(|d| AudioDeviceDiagnosticResponse {
+            id: d.id,
+            name: d.name,
+            sample_format: d.sample_format,
+            channels: d.channels,
+            sample_rate: d.sample_rate,
+        })
+        .collect();
+
+    Ok(ApiResponse::success(AudioDiagnosticsResponse {
+        default_device: diagnostics.default_device,
+        devices,
+        blackhole_installed: diagnostics.blackhole_installed,
+        blackhole_device: diagnostics.blackhole_device,
     }))
 }
 

@@ -115,6 +115,7 @@ pub fn run() {
             start_recording_command,
             stop_recording_command,
             list_audio_devices_command,
+            get_audio_diagnostics_command,
             test_microphone_command,
             get_storage_usage_command,
             cleanup_old_recordings_command,
