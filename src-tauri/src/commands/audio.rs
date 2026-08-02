@@ -16,6 +16,7 @@ pub struct RecordingResponse {
     pub duration_seconds: f64,
     pub used_system_audio: bool,
     pub system_audio_error: Option<String>,
+    pub audio_truncated: bool,
 }
 
 impl From<RecordingResult> for RecordingResponse {
@@ -25,6 +26,7 @@ impl From<RecordingResult> for RecordingResponse {
             duration_seconds: result.duration_seconds,
             used_system_audio: result.used_system_audio,
             system_audio_error: result.system_audio_error,
+            audio_truncated: result.audio_truncated,
         }
     }
 }

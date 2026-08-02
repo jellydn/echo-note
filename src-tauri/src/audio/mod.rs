@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,18 +11,34 @@ use std::thread::{self, JoinHandle};
 use std::time::Instant;
 use tauri::Manager;
 
+/// Maximum recording duration retained in memory before the oldest samples are
+/// dropped (circular buffering). Bounds memory usage for very long sessions.
+pub const MAX_RECORDING_DURATION_SECS: u64 = 2 * 60 * 60;
+
+/// Convert a max duration and sample rate into a sample-count cap.
+fn max_samples_for(sample_rate: u32) -> usize {
+    (MAX_RECORDING_DURATION_SECS * u64::from(sample_rate)) as usize
+}
+
 /// Recording control messages
 pub enum RecordingCommand {
     Stop,
 }
 
-/// Audio recording state for a single device
+/// Audio recording state for a single device.
+///
+/// `audio_data` is a circular buffer: once it reaches `max_samples` the oldest
+/// samples are dropped (O(1) via [`VecDeque`]) and `truncated` is set, so very
+/// long recordings degrade gracefully instead of exhausting memory.
 #[derive(Debug, Clone, Default)]
 pub struct DeviceRecordingState {
-    pub audio_data: Arc<Mutex<Vec<f32>>>,
+    pub audio_data: Arc<Mutex<VecDeque<f32>>>,
     pub sample_rate: u32,
     #[allow(dead_code)]
     pub channels: u16,
+    #[allow(dead_code)]
+    pub max_samples: usize,
+    pub truncated: Arc<AtomicBool>,
 }
 
 /// Overall recording state
@@ -42,6 +58,9 @@ pub struct RecordingResult {
     pub duration_seconds: f64,
     pub used_system_audio: bool,
     pub system_audio_error: Option<String>,
+    /// True when the in-memory buffer hit its cap and the oldest samples were
+    /// dropped (recording exceeded [`MAX_RECORDING_DURATION_SECS`]).
+    pub audio_truncated: bool,
 }
 
 /// Thread handle for a single recording
@@ -89,11 +108,13 @@ impl AudioRecorder {
         }
 
         // Create mic recording state
-        let mic_audio_data = Arc::new(Mutex::new(Vec::new()));
+        let mic_audio_data = Arc::new(Mutex::new(VecDeque::new()));
         let mic_state = DeviceRecordingState {
             audio_data: Arc::clone(&mic_audio_data),
             sample_rate: 16000,
             channels: 1,
+            max_samples: max_samples_for(48000),
+            truncated: Arc::new(AtomicBool::new(false)),
         };
 
         // Reset overall state
@@ -120,11 +141,13 @@ impl AudioRecorder {
 
         // Start system audio recording if BlackHole is available
         if let Some(system_name) = system_device_name {
-            let system_audio_data = Arc::new(Mutex::new(Vec::new()));
+            let system_audio_data = Arc::new(Mutex::new(VecDeque::new()));
             let system_state = DeviceRecordingState {
                 audio_data: Arc::clone(&system_audio_data),
                 sample_rate: 16000,
                 channels: 1,
+                max_samples: max_samples_for(48000),
+                truncated: Arc::new(AtomicBool::new(false)),
             };
 
             // Update state to include system audio
@@ -235,17 +258,35 @@ impl AudioRecorder {
                 .lock()
                 .map_err(|e| anyhow::anyhow!("Failed to lock system audio data: {}", e))?;
 
-            mix_audio_streams(&mic_samples, &sys_samples, mic.sample_rate, sys.sample_rate)
+            let mic_vec: Vec<f32> = mic_samples.iter().copied().collect();
+            let sys_vec: Vec<f32> = sys_samples.iter().copied().collect();
+            mix_audio_streams(&mic_vec, &sys_vec, mic.sample_rate, sys.sample_rate)
         } else if let Some(mic) = &mic_data {
             // Mic only
             let mic_samples = mic
                 .audio_data
                 .lock()
                 .map_err(|e| anyhow::anyhow!("Failed to lock audio data: {}", e))?;
-            mic_samples.clone()
+            mic_samples.iter().copied().collect()
         } else {
             return Err(anyhow::anyhow!("No audio data recorded"));
         };
+
+        // Any device that dropped oldest samples means the buffer was truncated.
+        let audio_truncated = mic_data
+            .as_ref()
+            .map(|m| m.truncated.load(Ordering::SeqCst))
+            .unwrap_or(false)
+            || system_data
+                .as_ref()
+                .map(|s| s.truncated.load(Ordering::SeqCst))
+                .unwrap_or(false);
+        if audio_truncated {
+            log::warn!(
+                "Recording exceeded {}h in-memory cap — oldest samples were dropped",
+                MAX_RECORDING_DURATION_SECS / 3600
+            );
+        }
 
         // Determine sample rate for output
         let output_sample_rate = mic_data.as_ref().map(|s| s.sample_rate).unwrap_or(16000);
@@ -295,6 +336,7 @@ impl AudioRecorder {
             duration_seconds: duration,
             used_system_audio,
             system_audio_error,
+            audio_truncated,
         })
     }
 }
@@ -357,7 +399,7 @@ fn mix_audio_streams(
 fn run_single_recording_thread(
     device_id_or_name: &str,
     command_receiver: Receiver<RecordingCommand>,
-    audio_data: Arc<Mutex<Vec<f32>>>,
+    audio_data: Arc<Mutex<VecDeque<f32>>>,
     state: Arc<Mutex<RecordingState>>,
 ) -> Result<DeviceRecordingState> {
     let host = cpal::default_host();
@@ -375,18 +417,36 @@ fn run_single_recording_thread(
     let audio_data_clone = Arc::clone(&audio_data);
     let should_stop = Arc::new(AtomicBool::new(false));
     let should_stop_clone = Arc::clone(&should_stop);
+    let max_samples = max_samples_for(sample_rate);
+    let truncated = Arc::new(AtomicBool::new(false));
+    let truncated_clone = Arc::clone(&truncated);
 
     // Build and start the stream
     let stream = match sample_format {
-        SampleFormat::F32 => {
-            build_stream::<f32>(&device, &config.into(), audio_data_clone, should_stop_clone)?
-        }
-        SampleFormat::I16 => {
-            build_stream::<i16>(&device, &config.into(), audio_data_clone, should_stop_clone)?
-        }
-        SampleFormat::U16 => {
-            build_stream::<u16>(&device, &config.into(), audio_data_clone, should_stop_clone)?
-        }
+        SampleFormat::F32 => build_stream::<f32>(
+            &device,
+            &config.into(),
+            audio_data_clone,
+            should_stop_clone,
+            max_samples,
+            truncated_clone,
+        )?,
+        SampleFormat::I16 => build_stream::<i16>(
+            &device,
+            &config.into(),
+            audio_data_clone,
+            should_stop_clone,
+            max_samples,
+            truncated_clone,
+        )?,
+        SampleFormat::U16 => build_stream::<u16>(
+            &device,
+            &config.into(),
+            audio_data_clone,
+            should_stop_clone,
+            max_samples,
+            truncated_clone,
+        )?,
         _ => {
             return Err(anyhow::anyhow!(
                 "Unsupported sample format: {:?}",
@@ -429,6 +489,8 @@ fn run_single_recording_thread(
         audio_data,
         sample_rate,
         channels,
+        max_samples,
+        truncated,
     })
 }
 
@@ -436,8 +498,10 @@ fn run_single_recording_thread(
 fn build_stream<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
-    audio_data: Arc<Mutex<Vec<f32>>>,
+    audio_data: Arc<Mutex<VecDeque<f32>>>,
     should_stop: Arc<AtomicBool>,
+    max_samples: usize,
+    truncated: Arc<AtomicBool>,
 ) -> Result<cpal::Stream>
 where
     T: Sample + FromSample<f32> + SizedSample,
@@ -454,13 +518,19 @@ where
                 return;
             }
 
-            // Convert samples to f32 and store
+            // Convert samples to f32 and store with a bounded circular buffer:
+            // once the cap is reached, drop the oldest samples so long
+            // recordings cannot exhaust memory.
             let Ok(mut buffer) = audio_data.lock() else {
                 log::error!("Audio buffer lock poisoned — dropping samples");
                 return;
             };
             for frame in data.chunks(channels) {
-                buffer.push(mono_sample_from_frame(frame));
+                buffer.push_back(mono_sample_from_frame(frame));
+                if buffer.len() > max_samples {
+                    buffer.pop_front();
+                    truncated.store(true, Ordering::SeqCst);
+                }
             }
         },
         err_fn,
@@ -710,6 +780,50 @@ pub fn get_recordings_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn max_samples_for_scales_with_sample_rate() {
+        assert_eq!(max_samples_for(16000), MAX_RECORDING_DURATION_SECS as usize * 16000);
+        assert_eq!(max_samples_for(48000), MAX_RECORDING_DURATION_SECS as usize * 48000);
+    }
+
+    #[test]
+    fn circular_buffer_drops_oldest_samples_after_cap() {
+        let buffer = Arc::new(Mutex::new(VecDeque::new()));
+        let truncated = Arc::new(AtomicBool::new(false));
+        let max_samples = 4;
+
+        for i in 0..6 {
+            let mut guard = buffer.lock().unwrap();
+            guard.push_back(i as f32);
+            if guard.len() > max_samples {
+                guard.pop_front();
+                truncated.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let final_samples: Vec<f32> = buffer.lock().unwrap().iter().copied().collect();
+        assert_eq!(final_samples, vec![2.0, 3.0, 4.0, 5.0]);
+        assert!(truncated.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn circular_buffer_keeps_all_samples_below_cap() {
+        let buffer = Arc::new(Mutex::new(VecDeque::new()));
+        let truncated = Arc::new(AtomicBool::new(false));
+
+        for i in 0..3 {
+            let mut guard = buffer.lock().unwrap();
+            guard.push_back(i as f32);
+            if guard.len() > 100 {
+                guard.pop_front();
+                truncated.store(true, Ordering::SeqCst);
+            }
+        }
+
+        assert_eq!(buffer.lock().unwrap().len(), 3);
+        assert!(!truncated.load(Ordering::SeqCst));
+    }
 
     #[test]
     fn mono_sample_from_frame_averages_f32_channels() {

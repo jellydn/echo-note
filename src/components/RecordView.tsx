@@ -15,6 +15,7 @@ interface RecordingResponse {
 	duration_seconds: number;
 	used_system_audio: boolean;
 	system_audio_error: string | null;
+	audio_truncated: boolean;
 }
 
 // Meeting response from Tauri
@@ -273,6 +274,11 @@ export function RecordView({ onMeetingCreated, onNavigateToSettings }: RecordVie
 						? `System audio was not captured: ${response.data.system_audio_error}. The recording still includes microphone audio.`
 						: null,
 				);
+				if (response.data.audio_truncated) {
+					setError(
+						"Recording exceeded the 2-hour in-memory limit. The oldest audio was dropped — consider shorter sessions.",
+					);
+				}
 				// Set default title and show modal
 				setMeetingTitle(generateDefaultTitle());
 				setShowTitleModal(true);
