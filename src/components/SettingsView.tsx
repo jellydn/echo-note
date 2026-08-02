@@ -54,6 +54,20 @@ interface OllamaStatusResponse {
 	url: string;
 }
 
+// Storage usage for the recordings directory
+interface StorageUsage {
+	file_count: number;
+	total_bytes: number;
+	recordings_dir: string;
+}
+
+// Result of a cleanup pass
+interface CleanupSummary {
+	deleted_count: number;
+	freed_bytes: number;
+	retention_days: number;
+}
+
 // BlackHole status
 interface BlackHoleStatusResponse {
 	installed: boolean;
@@ -118,6 +132,10 @@ export function SettingsView() {
 	const [isSaving, setIsSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+	// Storage usage & retention
+	const [storageUsage, setStorageUsage] = useState<StorageUsage | null>(null);
+	const [isCleaning, setIsCleaning] = useState(false);
 	const [ollamaStatus, setOllamaStatus] = useState<OllamaStatusResponse | null>(null);
 	const [blackholeStatus, setBlackholeStatus] = useState<BlackHoleStatusResponse | null>(null);
 	const [hasHomebrew, setHasHomebrew] = useState<boolean>(false);
@@ -312,6 +330,45 @@ export function SettingsView() {
 			}
 		};
 	}, []);
+
+	// Fetch storage usage for the recordings directory
+	const fetchStorageUsage = useCallback(async () => {
+		try {
+			const response = await invoke<ApiResponse<StorageUsage>>("get_storage_usage_command");
+			if (response.success && response.data) {
+				setStorageUsage(response.data);
+			}
+		} catch {
+			// Storage stats are non-critical; ignore failures
+		}
+	}, []);
+
+	// Load storage usage on mount
+	useEffect(() => {
+		fetchStorageUsage();
+	}, [fetchStorageUsage]);
+
+	// Clean up old recordings using the configured retention policy
+	const handleCleanupRecordings = async () => {
+		setIsCleaning(true);
+		try {
+			const response = await invoke<ApiResponse<CleanupSummary>>("cleanup_old_recordings_command");
+			if (response.success && response.data) {
+				setSuccessMessage(
+					response.data.deleted_count > 0
+						? `Removed ${response.data.deleted_count} recording(s), freed ${formatFileSize(response.data.freed_bytes)}.`
+						: "No recordings exceeded the retention policy.",
+				);
+			} else {
+				setError(response.error || "Failed to clean up recordings");
+			}
+		} catch (err) {
+			setError(err instanceof Error ? err.message : "Failed to clean up recordings");
+		} finally {
+			setIsCleaning(false);
+			fetchStorageUsage();
+		}
+	};
 
 	// Save a setting value
 	const saveSetting = async (key: string, value: string) => {
@@ -952,6 +1009,39 @@ export function SettingsView() {
 								</div>
 							</div>
 						)}
+					</div>
+				</section>
+
+				{/* Storage & Cleanup */}
+				<section className="settings-section">
+					<h3 className="settings-section-title">Storage & Cleanup</h3>
+
+					<div className="settings-field">
+						{/* biome-ignore lint/a11y/noLabelWithoutControl: Label serves as section header */}
+						<label className="settings-label">Recordings Storage</label>
+						<div className="storage-usage-card">
+							{storageUsage ? (
+								<p className="settings-hint">
+									{storageUsage.file_count}{" "}
+									{storageUsage.file_count === 1 ? "recording" : "recordings"} using{" "}
+									{formatFileSize(storageUsage.total_bytes)}
+								</p>
+							) : (
+								<p className="settings-hint">No recordings yet.</p>
+							)}
+						</div>
+						<p className="settings-hint">
+							Original WAV files are kept for the configured retention period. Use the button below
+							to delete recordings older than the retention policy now.
+						</p>
+						<button
+							type="button"
+							className="storage-cleanup-button"
+							onClick={handleCleanupRecordings}
+							disabled={isCleaning || isSaving}
+						>
+							{isCleaning ? "Cleaning up..." : "🗑️ Clean up old recordings"}
+						</button>
 					</div>
 				</section>
 			</div>

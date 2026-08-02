@@ -1,6 +1,7 @@
+use crate::cleanup::{cleanup_expired_recordings, storage_usage, CleanupSummary, StorageUsage};
 use crate::{ApiResponse, AppStateExt};
 use audio::{get_recordings_dir, list_audio_devices, RecordingResult};
-use db::{get_setting, set_setting, DEFAULT_AUDIO_DEVICE};
+use db::{get_setting, set_setting, DEFAULT_AUDIO_DEVICE, DEFAULT_AUDIO_RETENTION_DAYS};
 use serde::Serialize;
 use system_audio::{
     auto_install_blackhole, get_blackhole_device_name, install_blackhole_driver,
@@ -238,6 +239,42 @@ pub async fn auto_install_blackhole_command(
 
     log::info!("BlackHole auto-install result: {:?}", method);
     Ok(ApiResponse::success(response))
+}
+
+#[tauri::command]
+pub async fn get_storage_usage_command(
+    app_handle: tauri::AppHandle,
+) -> Result<ApiResponse<StorageUsage>, String> {
+    let recordings_dir = get_recordings_dir(&app_handle)
+        .map_err(|e| format!("Failed to get recordings directory: {}", e))?;
+
+    let usage = storage_usage(&recordings_dir)
+        .map_err(|e| format!("Failed to compute storage usage: {}", e))?;
+
+    Ok(ApiResponse::success(usage))
+}
+
+#[tauri::command]
+pub async fn cleanup_old_recordings_command(
+    state: State<'_, AppStateExt>,
+    app_handle: tauri::AppHandle,
+) -> Result<ApiResponse<CleanupSummary>, String> {
+    let retention_days = get_setting(&state.db, "audio_retention_days", DEFAULT_AUDIO_RETENTION_DAYS)
+        .await
+        .map_err(|e| format!("Failed to get retention setting: {}", e))?
+        .parse::<u64>()
+        .unwrap_or_else(|_| {
+            log::warn!("Invalid audio_retention_days, using default {}", DEFAULT_AUDIO_RETENTION_DAYS);
+            30
+        });
+
+    let recordings_dir = get_recordings_dir(&app_handle)
+        .map_err(|e| format!("Failed to get recordings directory: {}", e))?;
+
+    let summary = cleanup_expired_recordings(&recordings_dir, retention_days)
+        .map_err(|e| format!("Failed to clean up recordings: {}", e))?;
+
+    Ok(ApiResponse::success(summary))
 }
 
 #[tauri::command]
