@@ -1,4 +1,5 @@
 mod audio;
+mod cleanup;
 mod commands;
 pub mod db;
 mod diarization;
@@ -112,6 +113,8 @@ pub fn run() {
             stop_recording_command,
             list_audio_devices_command,
             test_microphone_command,
+            get_storage_usage_command,
+            cleanup_old_recordings_command,
             check_blackhole_status_command,
             install_blackhole_command,
             check_homebrew_status_command,
