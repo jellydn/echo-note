@@ -483,18 +483,25 @@ pub fn transcribe_audio_with_options(
         spec.bits_per_sample
     );
 
-    // Read samples and convert to mono f32 at 16kHz
-    let samples: Vec<i16> = reader.samples::<i16>().filter_map(|s| s.ok()).collect();
-    let audio_data = pcm_i16_to_mono_f32(&samples, spec.channels);
+    // Stream-decode the WAV in bounded windows: for each window we read a fixed
+    // number of raw i16 samples, downmix to mono, resample to 16 kHz, and feed
+    // Whisper. The full recording is only ever held in memory when speaker
+    // diarization is enabled (it needs random access to the whole signal).
+    let channels = spec.channels;
+    let window_samples_16k = MAX_AUDIO_SAMPLES;
+    let window_source =
+        ((window_samples_16k as f64 * f64::from(spec.sample_rate) / 16000.0) as usize).max(1);
+    let total_frames = reader.duration();
+    let total_windows = ((f64::from(total_frames) * 16000.0 / f64::from(spec.sample_rate))
+        / window_samples_16k as f64)
+        .ceil()
+        .max(1.0) as usize;
 
-    // Resample to 16kHz if needed
-    let audio_data = if spec.sample_rate != 16000 {
-        resample_audio(&audio_data, spec.sample_rate, 16000)
-    } else {
-        audio_data
-    };
+    let mut raw_window: Vec<i16> = Vec::with_capacity(window_source * usize::from(channels));
+    let mut samples_iter = reader.samples::<i16>();
 
-    log::info!("Audio samples after processing: {}", audio_data.len());
+    // Retain the full normalized signal only when diarization needs it.
+    let mut full_audio: Option<Vec<f32>> = options.diarization_enabled.then(Vec::new);
 
     // Set up transcription parameters
     let mut params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
@@ -514,36 +521,57 @@ pub fn transcribe_audio_with_options(
         },
     );
 
-    // Process audio in chunks if needed (for very long files)
     let mut full_text = String::new();
     let mut transcript_segments = Vec::new();
-    let total_samples = audio_data.len();
-    let chunk_size = MAX_AUDIO_SAMPLES;
+    let mut window_offset_seconds = 0.0f64;
+    let mut windows_processed = 0usize;
 
-    for (chunk_idx, chunk) in audio_data.chunks(chunk_size).enumerate() {
-        // Calculate progress
-        let base_progress = 20.0;
-        let chunk_progress = (chunk_idx as f32 * chunk_size as f32 / total_samples as f32) * 70.0;
-        let percentage = base_progress + chunk_progress;
+    loop {
+        raw_window.clear();
+        for _ in 0..window_source * usize::from(channels) {
+            match samples_iter.next() {
+                Some(Ok(sample)) => raw_window.push(sample),
+                Some(Err(e)) => {
+                    log::warn!("Skipping unreadable WAV sample: {}", e);
+                    break;
+                }
+                None => break,
+            }
+        }
+        if raw_window.is_empty() {
+            break;
+        }
 
+        // Downmix + resample this bounded window.
+        let mono = pcm_i16_to_mono_f32(&raw_window, channels);
+        let mono_16k = if spec.sample_rate != 16000 {
+            resample_audio(&mono, spec.sample_rate, 16000)
+        } else {
+            mono
+        };
+        if let Some(full) = full_audio.as_mut() {
+            full.extend_from_slice(&mono_16k);
+        }
+
+        // Emit progress relative to the estimated window count.
+        let percentage = 20.0 + (windows_processed as f32 / total_windows as f32) * 70.0;
         let _ = app_handle.emit(
             "transcription-progress",
             TranscriptionProgress {
                 percentage,
                 status: format!(
-                    "Transcribing (chunk {}/{})...",
-                    chunk_idx + 1,
-                    total_samples.div_ceil(chunk_size)
+                    "Transcribing (window {}/{})...",
+                    windows_processed + 1,
+                    total_windows
                 ),
             },
         );
 
-        // Run transcription on this chunk
+        // Run transcription on this window.
         state
-            .full(params.clone(), chunk)
+            .full(params.clone(), &mono_16k)
             .map_err(|e| anyhow::anyhow!("Transcription failed: {:?}", e))?;
 
-        // Get the text
         let num_segments = state
             .full_n_segments()
             .map_err(|e| anyhow::anyhow!("Failed to get segment count: {:?}", e))?;
@@ -557,14 +585,13 @@ pub fn transcribe_audio_with_options(
                 continue;
             }
 
-            let chunk_offset_seconds = (chunk_idx * chunk_size) as f64 / 16000.0;
-            let start_seconds = chunk_offset_seconds
+            let start_seconds = window_offset_seconds
                 + state
                     .full_get_segment_t0(i)
                     .map_err(|e| anyhow::anyhow!("Failed to get segment start time: {:?}", e))?
                     as f64
                     * 0.01;
-            let end_seconds = chunk_offset_seconds
+            let end_seconds = window_offset_seconds
                 + state
                     .full_get_segment_t1(i)
                     .map_err(|e| anyhow::anyhow!("Failed to get segment end time: {:?}", e))?
@@ -580,7 +607,17 @@ pub fn transcribe_audio_with_options(
                 text: segment_text.to_string(),
             });
         }
+
+        window_offset_seconds += mono_16k.len() as f64 / 16000.0;
+        windows_processed += 1;
     }
+
+    let audio_data = full_audio.unwrap_or_default();
+    log::info!(
+        "Audio samples processed: {} ({} windows)",
+        audio_data.len(),
+        windows_processed
+    );
 
     // Speaker diarization (best-effort: keep "Speaker 1" labels if anything goes wrong).
     if options.diarization_enabled && !transcript_segments.is_empty() {
@@ -846,6 +883,27 @@ mod tests {
 
         assert!((mono[0] - 0.49998474).abs() < 0.00001);
         assert!((mono[1] - -0.5).abs() < 0.00001);
+    }
+
+    #[test]
+    fn test_pcm_i16_to_mono_f32_empty_input() {
+        assert!(pcm_i16_to_mono_f32(&[], 2).is_empty());
+    }
+
+    #[test]
+    fn test_pcm_i16_to_mono_f32_partial_frame_is_averaged() {
+        // A trailing incomplete frame (1 of 2 channels) must still be handled
+        // without panicking, mirroring the bounded-window decode path.
+        let mono = pcm_i16_to_mono_f32(&[32767], 2);
+        assert_eq!(mono.len(), 1);
+        assert!((mono[0] - 32767.0 / 32768.0).abs() < 0.00001);
+    }
+
+    #[test]
+    fn test_pcm_i16_to_mono_f32_handles_mono_channel() {
+        let samples = vec![32767, 0, -32768];
+        let mono = pcm_i16_to_mono_f32(&samples, 1);
+        assert_eq!(mono, vec![32767.0 / 32768.0, 0.0, -1.0]);
     }
 
     #[test]
