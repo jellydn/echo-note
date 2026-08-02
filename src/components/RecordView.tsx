@@ -9,6 +9,13 @@ interface ApiResponse<T> {
 	error: string | null;
 }
 
+interface BlackHoleStatusResponse {
+	installed: boolean;
+	device_name: string | null;
+}
+
+type BlackHoleInstallBanner = "checking" | "confirm" | "installing" | "done" | null;
+
 // Recording response from Tauri
 interface RecordingResponse {
 	file_path: string;
@@ -69,6 +76,8 @@ export function RecordView({ onMeetingCreated, onNavigateToSettings }: RecordVie
 	);
 	const [recordingResult, setRecordingResult] = useState<RecordingResponse | null>(null);
 	const [systemAudioWarning, setSystemAudioWarning] = useState<string | null>(null);
+	const [blackholeInstallBanner, setBlackholeInstallBanner] =
+		useState<BlackHoleInstallBanner>(null);
 
 	// Processing state
 	const [processingStage, setProcessingStage] = useState<ProcessingStage>("idle");
@@ -85,6 +94,72 @@ export function RecordView({ onMeetingCreated, onNavigateToSettings }: RecordVie
 
 	const unlistenRef = useRef<UnlistenFn | null>(null);
 	const recordingIntervalRef = useRef<number | null>(null);
+
+	// Check BlackHole status on mount — show an install banner if it's not
+	// installed and this is the user's first time seeing the prompt.
+	useEffect(() => {
+		const checkBlackHole = async () => {
+			if (sessionStorage.getItem("_blackhole_banner_dismissed")) {
+				return;
+			}
+			setBlackholeInstallBanner("checking");
+			try {
+				const response = await invoke<ApiResponse<BlackHoleStatusResponse>>(
+					"check_blackhole_status_command",
+				);
+				if (response.success && response.data && !response.data.installed) {
+					setBlackholeInstallBanner("confirm");
+				} else {
+					setBlackholeInstallBanner(null);
+				}
+			} catch {
+				setBlackholeInstallBanner(null);
+			}
+		};
+		checkBlackHole();
+	}, []);
+
+	// Install BlackHole via auto-install (bundled → Homebrew → manual)
+	const installBlackHole = async () => {
+		setBlackholeInstallBanner("installing");
+		setError(null);
+		try {
+			const response = await invoke<ApiResponse<{ method: string }>>(
+				"auto_install_blackhole_command",
+			);
+			if (response.success) {
+				setBlackholeInstallBanner("done");
+				// Re-check status after a few seconds so the user sees the
+				// post-install detection result.
+				setTimeout(async () => {
+					try {
+						const recheck = await invoke<ApiResponse<BlackHoleStatusResponse>>(
+							"check_blackhole_status_command",
+						);
+						if (recheck.success && recheck.data) {
+							if (recheck.data.installed) {
+								setBlackholeInstallBanner(null);
+							}
+						}
+					} catch {
+						// ignore
+					}
+				}, 5000);
+			} else {
+				setError(response.error || "Installation failed. Try again from Settings.");
+				setBlackholeInstallBanner("confirm");
+			}
+		} catch (err) {
+			setError(err instanceof Error ? err.message : "Installation failed");
+			setBlackholeInstallBanner("confirm");
+		}
+	};
+
+	// Dismiss the BlackHole banner for this session
+	const dismissBlackHoleBanner = () => {
+		sessionStorage.setItem("_blackhole_banner_dismissed", "1");
+		setBlackholeInstallBanner(null);
+	};
 
 	// Listen to transcription progress events
 	useEffect(() => {
@@ -429,6 +504,50 @@ export function RecordView({ onMeetingCreated, onNavigateToSettings }: RecordVie
 	return (
 		<div className="record-view">
 			<div className="record-container">
+				{/* BlackHole install banner */}
+				{blackholeInstallBanner === "checking" && (
+					<div className="blackhole-banner checking">
+						<span className="banner-spinner" />
+						<span>Checking system audio configuration...</span>
+					</div>
+				)}
+				{blackholeInstallBanner === "confirm" && (
+					<div className="blackhole-banner confirm">
+						<span className="banner-icon">🎧</span>
+						<div className="banner-content">
+							<strong>System audio not detected</strong>
+							<p>
+								To capture meeting audio from Zoom, Teams, and other apps, install the BlackHole
+								virtual audio driver. It only takes a moment.
+							</p>
+						</div>
+						<div className="banner-actions">
+							<button type="button" className="banner-button primary" onClick={installBlackHole}>
+								Install BlackHole
+							</button>
+							<button
+								type="button"
+								className="banner-button secondary"
+								onClick={dismissBlackHoleBanner}
+							>
+								Later
+							</button>
+						</div>
+					</div>
+				)}
+				{blackholeInstallBanner === "installing" && (
+					<div className="blackhole-banner installing">
+						<span className="banner-spinner" />
+						<span>Installing BlackHole... You may need to enter your password.</span>
+					</div>
+				)}
+				{blackholeInstallBanner === "done" && (
+					<div className="blackhole-banner done">
+						<span className="banner-icon">✅</span>
+						<span>Installation started. Complete the prompts, then click record.</span>
+					</div>
+				)}
+
 				{/* Recording Status */}
 				<div className={`recording-status ${isRecording ? "active" : ""}`}>
 					{isRecording && (
