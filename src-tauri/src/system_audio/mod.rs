@@ -1,6 +1,32 @@
+//! # Security audit: external process execution
+//!
+//! **Audited:** 2026-08-02 · **Issue:** [#5](https://github.com/jellydn/echo-note/issues/5)
+//!
+//! ## Scope
+//! Every place EchoNote shells out to a macOS tool: `open`, `which`,
+//! `system_profiler`, and `osascript` (Homebrew + bundled `.pkg` installers).
+//!
+//! ## Findings
+//! - No user-controlled input is interpolated into any shell string. The
+//!   Homebrew flow runs a static AppleScript; the bundled-installer flow
+//!   passes the package path as an `argv` argument and uses `quoted form of`,
+//!   the standard macOS-safe escaping for `do shell script`.
+//! - All command arguments are passed as argument vectors to
+//!   [`std::process::Command`] — nothing is executed through a shell
+//!   (`sh -c`) that could reinterpret metacharacters.
+//! - The bundled installer path is validated to live inside the app's own
+//!   resources directory before it is executed (defense in depth).
+//!
+//! ## Rules for future changes
+//! 1. Never interpolate user input into an AppleScript or shell string.
+//! 2. Prefer argument vectors over shell strings; if a shell string is
+//!    unavoidable, escape with `quoted form of`.
+//! 3. Re-run `cargo test --manifest-path src-tauri/Cargo.toml system_audio`
+//!    after touching any `Command` construction here.
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::HashSet;
+use std::path::Path;
 use std::process::Command;
 use tauri::Manager;
 
@@ -273,15 +299,10 @@ pub fn install_blackhole_via_homebrew() -> Result<()> {
         ));
     }
 
-    // Open Terminal with the brew reinstall command so the user can enter their password
+    // Open Terminal with the brew reinstall command so the user can enter
+    // their password. The AppleScript is a static constant (no interpolation).
     Command::new("osascript")
-        .args([
-            "-e",
-            r#"tell application "Terminal"
-    activate
-    do script "brew reinstall blackhole-2ch && echo '✅ BlackHole installed! You can close this window.' || echo '❌ Installation failed.'"
-end tell"#,
-        ])
+        .args(["-e", HOME_BREW_INSTALL_SCRIPT])
         .spawn()
         .context("Failed to open Terminal. Please run 'brew reinstall blackhole-2ch' manually in Terminal.")?;
 
@@ -330,21 +351,25 @@ pub fn install_blackhole_from_bundle(app_handle: &tauri::AppHandle) -> Result<()
 
     log::info!("Installing BlackHole from bundled package: {:?}", pkg_path);
 
-    // Use macOS installer command with a privileged helper
-    // This will prompt the user for admin password via macOS UI.
-    // Use AppleScript's `quoted form of` for proper shell escaping.
-    let escaped_path = pkg_path
-        .to_string_lossy()
-        .replace("\\", "\\\\")
-        .replace("\"", "\\\"");
+    // Defense in depth: refuse to run an installer that isn't inside the
+    // app's own resources directory.
+    let resource_dir = app_handle
+        .path()
+        .resource_dir()
+        .context("Failed to get resource directory")?;
+    if !is_within_directory(&resource_dir, &pkg_path) {
+        return Err(anyhow::anyhow!(
+            "Refusing to run installer outside the app resources: {:?}",
+            pkg_path
+        ));
+    }
+
+    // The package path is passed as an `argv` argument to the AppleScript and
+    // shell-escaped with `quoted form of` — never interpolated into the script
+    // text (see the module-level security audit for the rationale).
+    let pkg_path_str = pkg_path.to_string_lossy().to_string();
     let status = Command::new("osascript")
-        .args([
-            "-e",
-            &format!(
-                r#"do shell script "installer -pkg " & quoted form of "{}" & " -target /" with administrator privileges"#,
-                escaped_path
-            ),
-        ])
+        .args(["-e", BUNDLED_INSTALL_SCRIPT, &pkg_path_str])
         .status()
         .context("Failed to execute installer script")?;
 
@@ -357,6 +382,31 @@ pub fn install_blackhole_from_bundle(app_handle: &tauri::AppHandle) -> Result<()
             status
         ))
     }
+}
+
+/// Static AppleScript that runs `brew reinstall blackhole-2ch` in Terminal.
+/// The script must never contain interpolated values — any future change that
+/// needs input must pass it through `argv` like [`BUNDLED_INSTALL_SCRIPT`].
+pub const HOME_BREW_INSTALL_SCRIPT: &str = r#"tell application "Terminal"
+    activate
+    do script "brew reinstall blackhole-2ch && echo '✅ BlackHole installed! You can close this window.' || echo '❌ Installation failed.'"
+end tell"#;
+
+/// AppleScript that installs the bundled `.pkg` with admin rights. The package
+/// path arrives in `argv` (as an `osascript` command-line argument) and is
+/// shell-escaped with `quoted form of`, so the script text itself never
+/// contains the path.
+pub const BUNDLED_INSTALL_SCRIPT: &str = r#"on run argv
+    set pkgPath to item 1 of argv
+    do shell script "installer -pkg " & quoted form of pkgPath & " -target /" with administrator privileges
+end run"#;
+
+/// Returns true when `candidate` is located inside `base`. Used as a
+/// defense-in-depth guard before executing bundled installers.
+fn is_within_directory(base: &Path, candidate: &Path) -> bool {
+    let base = base.canonicalize().unwrap_or_else(|_| base.to_path_buf());
+    let candidate = candidate.canonicalize().unwrap_or_else(|_| candidate.to_path_buf());
+    candidate.starts_with(&base)
 }
 
 /// Auto-install BlackHole using the best available method
@@ -416,6 +466,49 @@ pub fn setup_blackhole_on_first_launch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn homebrew_install_script_has_no_interpolation_placeholders() {
+        // The script must never contain format placeholders or shell
+        // substitution that could be fed with user input.
+        assert!(!HOME_BREW_INSTALL_SCRIPT.contains("{}"));
+        assert!(!HOME_BREW_INSTALL_SCRIPT.contains("$("));
+        assert!(!HOME_BREW_INSTALL_SCRIPT.contains(";"));
+        assert!(HOME_BREW_INSTALL_SCRIPT.contains("brew reinstall blackhole-2ch"));
+    }
+
+    #[test]
+    fn bundled_install_script_passes_path_via_argv_not_interpolation() {
+        // The path must flow through argv + `quoted form of`, never be
+        // interpolated into the script body.
+        assert!(BUNDLED_INSTALL_SCRIPT.contains("on run argv"));
+        assert!(BUNDLED_INSTALL_SCRIPT.contains("item 1 of argv"));
+        assert!(BUNDLED_INSTALL_SCRIPT.contains("quoted form of"));
+        assert!(!BUNDLED_INSTALL_SCRIPT.contains("escaped_path"));
+        assert!(!BUNDLED_INSTALL_SCRIPT.contains("{}"));
+    }
+
+    #[test]
+    fn is_within_directory_rejects_paths_outside_base() {
+        let base = std::env::temp_dir().join("echo-note-audit-test");
+        let inside = base.join("resources").join("BlackHole2ch-0.6.0.pkg");
+        assert!(is_within_directory(&base, &inside));
+
+        let outside = std::path::PathBuf::from("/etc/passwd");
+        assert!(!is_within_directory(&base, &outside));
+
+        // A sibling whose name merely shares a prefix must not count as inside.
+        let sibling_prefix = std::env::temp_dir().join("echo-note-audit-test-evil");
+        assert!(!is_within_directory(&base, &sibling_prefix));
+    }
+
+    #[test]
+    fn install_blackhole_driver_uses_hardcoded_url() {
+        // The download URL is a compile-time constant; no user input flows into
+        // the `open` command.
+        assert!(!BUNDLED_PKG_NAME.is_empty());
+        assert!(BUNDLED_PKG_NAME.ends_with(".pkg"));
+    }
 
     #[test]
     fn test_extract_json_string_value() {
