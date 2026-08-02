@@ -103,6 +103,17 @@ impl<T> ModelCache<T> {
 pub type WhisperModelCache = ModelCache<WhisperContext>;
 
 /// Whisper model sizes supported (name, filename, expected_bytes, display_label)
+///
+/// ## Known-good binding combinations (issue #35)
+///
+/// | whisper-rs | whisper.cpp | Verified models |
+/// |------------|-------------|-----------------|
+/// | 0.13.x     | v1.7.x      | tiny, base, small, medium, large-v3-turbo |
+///
+/// Model files are selected by name and validated by expected size after
+/// download; load/inference compatibility is only proven by the opt-in smoke
+/// test (`ECHO_NOTE_WHISPER_SMOKE_TEST=1`). Renovate updates to `whisper-rs`
+/// must run that smoke test before merge.
 pub const WHISPER_MODELS: &[(&str, &str, u64, &str)] = &[
     ("tiny", "ggml-tiny.bin", 78_000_000, "Tiny"),
     ("tiny-q5_1", "ggml-tiny-q5_1.bin", 33_000_000, "Tiny (Q5)"),
@@ -165,13 +176,46 @@ pub fn get_model_filename(model_size: &str) -> Result<&'static str> {
         .ok_or_else(|| anyhow::anyhow!("Invalid model size: {}", model_size))
 }
 
-/// Check if a model is already downloaded
+/// Validate a downloaded model file against its expected size. A model whose
+/// size does not match is treated as corrupt and removed so the app re-downloads
+/// it instead of failing at inference time.
+pub fn validate_model_file(model_path: &PathBuf, expected_size: u64) -> Result<bool> {
+    let actual_size = fs::metadata(model_path)
+        .with_context(|| format!("Failed to inspect model file at {:?}", model_path))?
+        .len();
+
+    if actual_size != expected_size {
+        log::warn!(
+            "Model file {:?} has size {}, expected {} — removing as corrupt",
+            model_path,
+            actual_size,
+            expected_size
+        );
+        fs::remove_file(model_path)
+            .with_context(|| format!("Failed to remove corrupt model at {:?}", model_path))?;
+        return Ok(false);
+    }
+
+    Ok(true)
+}
+
+/// Check if a model is already downloaded and passes size validation
 pub fn is_model_downloaded(app_handle: &AppHandle, model_size: &str) -> Result<bool> {
     let models_dir = get_models_dir(app_handle)?;
     let filename = get_model_filename(model_size)?;
     let model_path = models_dir.join(filename);
 
-    Ok(model_path.exists())
+    if !model_path.exists() {
+        return Ok(false);
+    }
+
+    let expected_size = WHISPER_MODELS
+        .iter()
+        .find(|(size, _, _, _)| *size == model_size)
+        .map(|(_, _, expected, _)| *expected)
+        .unwrap_or(0);
+
+    validate_model_file(&model_path, expected_size)
 }
 
 /// Get the full path to a model file
@@ -181,10 +225,17 @@ pub fn get_model_path(app_handle: &AppHandle, model_size: &str) -> Result<Option
     let model_path = models_dir.join(filename);
 
     if model_path.exists() {
-        Ok(Some(model_path))
-    } else {
-        Ok(None)
+        let expected_size = WHISPER_MODELS
+            .iter()
+            .find(|(size, _, _, _)| *size == model_size)
+            .map(|(_, _, expected, _)| *expected)
+            .unwrap_or(0);
+        if validate_model_file(&model_path, expected_size)? {
+            return Ok(Some(model_path));
+        }
     }
+
+    Ok(None)
 }
 
 /// Download progress event payload
@@ -291,13 +342,44 @@ pub async fn download_whisper_model(app_handle: &AppHandle, model_size: &str) ->
         log::warn!("Failed to emit final download progress: {}", e);
     }
 
+    // Validate the downloaded file against the expected size before accepting
+    // it. A mismatched file is removed so a later transcription does not fail
+    // at load/inference time with a corrupt model.
+    if !validate_model_file(&model_path, *expected_size)? {
+        return Err(anyhow::anyhow!(
+            "Downloaded model {} failed size validation and was removed",
+            model_size
+        ));
+    }
+
     log::info!(
-        "Successfully downloaded model {} to {:?}",
+        "Successfully downloaded model {} to {:?} (validated)",
         model_size,
         model_path
     );
 
     Ok(model_path)
+}
+
+/// Opt-in Whisper smoke test (issue #35).
+///
+/// Runs a real transcription against the given audio file using the given
+/// model size, proving that the downloaded model and the linked `whisper-rs`
+/// binding can load and infer together. This is intended for CI / release
+/// verification and is gated behind `ECHO_NOTE_WHISPER_SMOKE_TEST=1` so it
+/// never runs accidentally during normal development.
+#[allow(dead_code)]
+pub fn run_whisper_smoke_test(app_handle: &AppHandle, audio_path: &str, model_size: &str) -> Result<()> {
+    let result = transcribe_audio(app_handle, audio_path, model_size)?;
+    if result.text.trim().is_empty() {
+        anyhow::bail!("Smoke test produced an empty transcript");
+    }
+    log::info!(
+        "Whisper smoke test passed: model '{}' transcribed {} chars",
+        model_size,
+        result.text.len()
+    );
+    Ok(())
 }
 
 /// Get information about all available models and their download status
@@ -836,6 +918,36 @@ mod tests {
         let value = cache.get_or_load("small", || Ok(7));
         assert_eq!(value.unwrap(), &7);
         assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn validate_model_file_accepts_matching_size() {
+        let dir = std::env::temp_dir().join(format!("echo-note-whisper-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("ggml-tiny.bin");
+        std::fs::write(&path, vec![0u8; 78_000_000]).unwrap();
+
+        assert!(validate_model_file(&path, 78_000_000).unwrap());
+        assert!(path.exists(), "matching file must be kept");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn validate_model_file_removes_mismatched_size() {
+        let dir = std::env::temp_dir().join(format!("echo-note-whisper-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("ggml-tiny.bin");
+        std::fs::write(&path, vec![0u8; 1024]).unwrap();
+
+        assert!(!validate_model_file(&path, 78_000_000).unwrap());
+        assert!(!path.exists(), "corrupt file must be removed");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn validate_model_file_errors_on_missing_file() {
+        let path = std::env::temp_dir().join("echo-note-does-not-exist.bin");
+        assert!(validate_model_file(&path, 100).is_err());
     }
 
     #[test]
