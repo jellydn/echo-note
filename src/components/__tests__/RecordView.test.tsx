@@ -7,6 +7,7 @@ import { RecordView } from "../RecordView";
 describe("RecordView", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		sessionStorage.clear();
 	});
 
 	it("shows idle state initially", () => {
@@ -280,6 +281,199 @@ describe("RecordView", () => {
 		// Should return to idle state
 		await waitFor(() => {
 			expect(screen.getByText("Ready to record")).toBeInTheDocument();
+		});
+	});
+
+	describe("BlackHole install banner", () => {
+		it("shows checking state when BlackHole is not installed", async () => {
+			vi.mocked(invoke).mockImplementation(async (command: string) => {
+				if (command === "check_blackhole_status_command") {
+					return {
+						success: true,
+						data: { installed: false, device_name: null },
+						error: null,
+					};
+				}
+				return { success: false, data: null, error: "Unknown command" };
+			});
+
+			render(<RecordView />);
+
+			await waitFor(() => {
+				expect(
+					screen.getByText("Checking system audio configuration..."),
+				).toBeInTheDocument();
+			});
+
+			await waitFor(() => {
+				expect(
+					screen.getByText("System audio not detected"),
+				).toBeInTheDocument();
+			});
+
+			expect(
+				screen.getByRole("button", { name: /install blackhole/i }),
+			).toBeInTheDocument();
+			expect(screen.getByRole("button", { name: /later/i })).toBeInTheDocument();
+		});
+
+		it("hides banner when BlackHole is already installed", async () => {
+			vi.mocked(invoke).mockImplementation(async (command: string) => {
+				if (command === "check_blackhole_status_command") {
+					return {
+						success: true,
+						data: { installed: true, device_name: "BlackHole 2ch" },
+						error: null,
+					};
+				}
+				return { success: false, data: null, error: "Unknown command" };
+			});
+
+			render(<RecordView />);
+
+			await waitFor(() => {
+				expect(screen.getByText("Ready to record")).toBeInTheDocument();
+			});
+
+			expect(
+				screen.queryByText("System audio not detected"),
+			).not.toBeInTheDocument();
+		});
+
+		it("dismisses banner when Later is clicked", async () => {
+			vi.mocked(invoke).mockImplementation(async (command: string) => {
+				if (command === "check_blackhole_status_command") {
+					return {
+						success: true,
+						data: { installed: false, device_name: null },
+						error: null,
+					};
+				}
+				return { success: false, data: null, error: "Unknown command" };
+			});
+
+			render(<RecordView />);
+
+			await waitFor(() => {
+				expect(
+					screen.getByText("System audio not detected"),
+				).toBeInTheDocument();
+			});
+
+			await userEvent.click(screen.getByRole("button", { name: /later/i }));
+
+			await waitFor(() => {
+				expect(
+					screen.queryByText("System audio not detected"),
+				).not.toBeInTheDocument();
+			});
+		});
+
+		it("shows installing state during installation", async () => {
+			vi.mocked(invoke).mockImplementation(async (command: string) => {
+				if (command === "check_blackhole_status_command") {
+					return {
+						success: true,
+						data: { installed: false, device_name: null },
+						error: null,
+					};
+				}
+				if (command === "auto_install_blackhole_command") {
+					// Keep installing — don't resolve immediately
+					return new Promise(() => {});
+				}
+				return { success: false, data: null, error: "Unknown command" };
+			});
+
+			render(<RecordView />);
+
+			await waitFor(() => {
+				expect(
+					screen.getByText("System audio not detected"),
+				).toBeInTheDocument();
+			});
+
+			await userEvent.click(
+				screen.getByRole("button", { name: /install blackhole/i }),
+			);
+
+			expect(
+				screen.getByText(/Installing BlackHole/),
+			).toBeInTheDocument();
+		});
+
+		it("shows done state on successful installation", async () => {
+			vi.mocked(invoke).mockImplementation(async (command: string) => {
+				if (command === "check_blackhole_status_command") {
+					return {
+						success: true,
+						data: { installed: false, device_name: null },
+						error: null,
+					};
+				}
+				if (command === "auto_install_blackhole_command") {
+					return {
+						success: true,
+						data: { method: "homebrew" },
+						error: null,
+					};
+				}
+				return { success: false, data: null, error: "Unknown command" };
+			});
+
+			render(<RecordView />);
+
+			await waitFor(() => {
+				expect(
+					screen.getByText("System audio not detected"),
+				).toBeInTheDocument();
+			});
+
+			await userEvent.click(
+				screen.getByRole("button", { name: /install blackhole/i }),
+			);
+
+			await waitFor(() => {
+				expect(
+					screen.getByText(/Installation started/),
+				).toBeInTheDocument();
+			});
+		});
+
+		it("shows error when installation fails", async () => {
+			vi.mocked(invoke).mockImplementation(async (command: string) => {
+				if (command === "check_blackhole_status_command") {
+					return {
+						success: true,
+						data: { installed: false, device_name: null },
+						error: null,
+					};
+				}
+				if (command === "auto_install_blackhole_command") {
+					return {
+						success: false,
+						data: null,
+						error: "Homebrew not found",
+					};
+				}
+				return { success: false, data: null, error: "Unknown command" };
+			});
+
+			render(<RecordView />);
+
+			await waitFor(() => {
+				expect(
+					screen.getByText("System audio not detected"),
+				).toBeInTheDocument();
+			});
+
+			await userEvent.click(
+				screen.getByRole("button", { name: /install blackhole/i }),
+			);
+
+			await waitFor(() => {
+				expect(screen.getByText("Homebrew not found")).toBeInTheDocument();
+			});
 		});
 	});
 });

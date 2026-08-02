@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HistoryView } from "../HistoryView";
@@ -208,6 +208,182 @@ describe("HistoryView", () => {
 
 		await waitFor(() => {
 			expect(screen.getByText("Team Standup")).toBeInTheDocument();
+		});
+	});
+
+	describe("search box", () => {
+		it("shows search input when meetings are loaded", async () => {
+			vi.mocked(invoke).mockResolvedValue({
+				success: true,
+				data: mockMeetings,
+				error: null,
+			});
+
+			render(<HistoryView />);
+
+			await waitFor(() => {
+				expect(screen.getByText("Team Standup")).toBeInTheDocument();
+			});
+
+			expect(
+				screen.getByPlaceholderText(
+					"Search meetings, transcripts, summaries…",
+				),
+			).toBeInTheDocument();
+		});
+
+		it("triggers search when typing a query", async () => {
+			const searchResults = [
+				{
+					id: 1,
+					title: "Team Standup",
+					date: "2026-04-20T10:00:00Z",
+					duration_seconds: 900,
+					audio_path: "/path/to/audio1.wav",
+					created_at: "2026-04-20T10:00:00Z",
+				},
+			];
+
+			vi.mocked(invoke).mockImplementation(async (command: string) => {
+				if (command === "list_meetings_command") {
+					return { success: true, data: mockMeetings, error: null };
+				}
+				if (command === "search_meetings_command") {
+					return { success: true, data: searchResults, error: null };
+				}
+				return { success: false, data: null, error: "Unknown command" };
+			});
+
+			render(<HistoryView />);
+
+			await waitFor(() => {
+				expect(screen.getByText("Team Standup")).toBeInTheDocument();
+			});
+
+			// Use fireEvent.change to set the value atomically (no per-character delays)
+			const searchInput = screen.getByPlaceholderText(
+				"Search meetings, transcripts, summaries…",
+			) as HTMLInputElement;
+
+			fireEvent.change(searchInput, { target: { value: "budget" } });
+
+			// Wait for the debounced search to fire (250ms debounce)
+			await waitFor(
+				() => {
+					expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+						"search_meetings_command",
+						expect.objectContaining({ query: "budget" }),
+					);
+				},
+				{ timeout: 2000 },
+			);
+
+			// Search results should show
+			await waitFor(() => {
+				expect(screen.getByText("1 meeting recorded")).toBeInTheDocument();
+			});
+		});
+
+		it("shows error when search fails", async () => {
+			vi.mocked(invoke).mockImplementation(async (command: string) => {
+				if (command === "list_meetings_command") {
+					return { success: true, data: mockMeetings, error: null };
+				}
+				if (command === "search_meetings_command") {
+					return {
+						success: false,
+						data: null,
+						error: "Search index not ready",
+					};
+				}
+				return { success: false, data: null, error: "Unknown command" };
+			});
+
+			render(<HistoryView />);
+
+			await waitFor(() => {
+				expect(screen.getByText("Team Standup")).toBeInTheDocument();
+			});
+
+			const searchInput = screen.getByPlaceholderText(
+				"Search meetings, transcripts, summaries…",
+			) as HTMLInputElement;
+
+			fireEvent.change(searchInput, { target: { value: "budget" } });
+
+			await waitFor(
+				() => {
+					expect(screen.getByText("Search index not ready")).toBeInTheDocument();
+				},
+				{ timeout: 2000 },
+			);
+		});
+
+		it("returns to full list when search query is cleared", async () => {
+			const searchResults = [
+				{
+					id: 1,
+					title: "Team Standup",
+					date: "2026-04-20T10:00:00Z",
+					duration_seconds: 900,
+					audio_path: "/path/to/audio1.wav",
+					created_at: "2026-04-20T10:00:00Z",
+				},
+			];
+
+			let searchCalledCount = 0;
+			let listCalledCount = 0;
+			vi.mocked(invoke).mockImplementation(async (command: string) => {
+				if (command === "list_meetings_command") {
+					listCalledCount++;
+					return { success: true, data: mockMeetings, error: null };
+				}
+				if (command === "search_meetings_command") {
+					searchCalledCount++;
+					return { success: true, data: searchResults, error: null };
+				}
+				return { success: false, data: null, error: "Unknown command" };
+			});
+
+			render(<HistoryView />);
+
+			// Wait for initial load to complete
+			await waitFor(() => {
+				expect(screen.getByText("Team Standup")).toBeInTheDocument();
+			});
+
+			const searchInput = screen.getByPlaceholderText(
+				"Search meetings, transcripts, summaries…",
+			) as HTMLInputElement;
+
+			// Type and trigger search
+			fireEvent.change(searchInput, { target: { value: "budget" } });
+
+			await waitFor(
+				() => {
+					expect(searchCalledCount).toBe(1);
+				},
+				{ timeout: 2000 },
+			);
+
+			// Clear the search by setting native value and dispatching input
+			const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+				window.HTMLInputElement.prototype,
+				"value",
+			)?.set;
+			if (nativeInputValueSetter) {
+				nativeInputValueSetter.call(searchInput, "");
+			}
+			searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+			searchInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+			// Should reload full list
+			await waitFor(
+				() => {
+					expect(listCalledCount).toBeGreaterThanOrEqual(2);
+				},
+				{ timeout: 2000 },
+			);
 		});
 	});
 });

@@ -375,4 +375,149 @@ describe("MeetingDetailView", () => {
 		expect(screen.getByText("John: Prepare design mockups")).toBeInTheDocument();
 		expect(screen.getByText("Sarah: Schedule follow-up")).toBeInTheDocument();
 	});
+
+	describe("export button", () => {
+		it("shows export button when meeting is loaded", async () => {
+			vi.mocked(invoke).mockImplementation(async (command: string) => {
+				switch (command) {
+					case "get_meeting_command":
+						return { success: true, data: mockMeeting, error: null };
+					case "get_transcript_by_meeting_command":
+						return { success: true, data: null, error: null };
+					case "get_summary_by_meeting_command":
+						return { success: true, data: null, error: null };
+					default:
+						return { success: false, data: null, error: "Unknown command" };
+				}
+			});
+
+			render(<MeetingDetailView meetingId={1} />);
+
+			await waitFor(() => {
+				expect(screen.getByText("Product Planning Meeting")).toBeInTheDocument();
+			});
+
+			expect(
+				screen.getByRole("button", { name: /export/i }),
+			).toBeInTheDocument();
+		});
+
+		it("calls export_meeting_command and copies to clipboard", async () => {
+			const mockClipboard = {
+				writeText: vi.fn().mockResolvedValue(undefined),
+			};
+			Object.assign(navigator, { clipboard: mockClipboard });
+
+			vi.mocked(invoke).mockImplementation(async (command: string) => {
+				switch (command) {
+					case "get_meeting_command":
+						return { success: true, data: mockMeeting, error: null };
+					case "get_transcript_by_meeting_command":
+						return { success: true, data: null, error: null };
+					case "get_summary_by_meeting_command":
+						return { success: true, data: null, error: null };
+					case "export_meeting_command":
+						return {
+							success: true,
+							data: {
+								format: "markdown",
+								content: "# Meeting Notes\n\nSome content",
+								filename: "product-planning-meeting.md",
+							},
+							error: null,
+						};
+					default:
+						return { success: false, data: null, error: "Unknown command" };
+				}
+			});
+
+			render(<MeetingDetailView meetingId={1} />);
+
+			await waitFor(() => {
+				expect(screen.getByText("Product Planning Meeting")).toBeInTheDocument();
+			});
+
+			await userEvent.click(
+				screen.getByRole("button", { name: /export/i }),
+			);
+
+			await waitFor(() => {
+				expect(
+					screen.getByText(/Exported product-planning-meeting.md/),
+				).toBeInTheDocument();
+			});
+
+			expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+				"# Meeting Notes\n\nSome content",
+			);
+		});
+
+		it("shows error when export fails", async () => {
+			vi.mocked(invoke).mockImplementation(async (command: string) => {
+				switch (command) {
+					case "get_meeting_command":
+						return { success: true, data: mockMeeting, error: null };
+					case "get_transcript_by_meeting_command":
+						return { success: true, data: null, error: null };
+					case "get_summary_by_meeting_command":
+						return { success: true, data: null, error: null };
+					case "export_meeting_command":
+						return {
+							success: false,
+							data: null,
+							error: "Export failed: no transcript",
+						};
+					default:
+						return { success: false, data: null, error: "Unknown command" };
+				}
+			});
+
+			render(<MeetingDetailView meetingId={1} />);
+
+			await waitFor(() => {
+				expect(screen.getByText("Product Planning Meeting")).toBeInTheDocument();
+			});
+
+			await userEvent.click(
+				screen.getByRole("button", { name: /export/i }),
+			);
+
+			await waitFor(() => {
+				expect(
+					screen.getByText("Export failed: no transcript"),
+				).toBeInTheDocument();
+			});
+		});
+
+		it("shows exporting state while export is in progress", async () => {
+			vi.mocked(invoke).mockImplementation(async (command: string) => {
+				switch (command) {
+					case "get_meeting_command":
+						return { success: true, data: mockMeeting, error: null };
+					case "get_transcript_by_meeting_command":
+						return { success: true, data: null, error: null };
+					case "get_summary_by_meeting_command":
+						return { success: true, data: null, error: null };
+					case "export_meeting_command":
+						// Keep pending so we see the loading state
+						return new Promise(() => {});
+					default:
+						return { success: false, data: null, error: "Unknown command" };
+				}
+			});
+
+			render(<MeetingDetailView meetingId={1} />);
+
+			await waitFor(() => {
+				expect(screen.getByText("Product Planning Meeting")).toBeInTheDocument();
+			});
+
+			await userEvent.click(
+				screen.getByRole("button", { name: /export/i }),
+			);
+
+			// Button should show exporting state
+			expect(screen.getByText("Exporting...")).toBeInTheDocument();
+		});
+	});
 });
