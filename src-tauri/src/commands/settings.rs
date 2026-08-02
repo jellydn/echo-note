@@ -1,7 +1,8 @@
 use crate::db;
+use crate::keychain::{is_secret_setting, API_KEY_ACCOUNT};
 use crate::{ApiResponse, AppStateExt};
 use db::{
-    delete_setting, get_setting, list_settings, set_setting, DEFAULT_API_ENDPOINT, DEFAULT_API_KEY,
+    delete_setting, get_setting, list_settings, set_setting, DEFAULT_API_ENDPOINT,
     DEFAULT_AUDIO_DEVICE, DEFAULT_LLM_PROVIDER, DEFAULT_WHISPER_MODEL_SIZE,
 };
 use serde::{Deserialize, Serialize};
@@ -44,11 +45,20 @@ pub async fn get_setting_command(
     state: State<'_, AppStateExt>,
     request: GetSettingRequest,
 ) -> Result<ApiResponse<String>, String> {
+    // Secrets (e.g. the API key) live in the OS credential store, never SQLite.
+    if is_secret_setting(&request.key) {
+        let value = state
+            .secret_store
+            .get(API_KEY_ACCOUNT)
+            .map_err(|e| format!("Failed to read secret: {}", e))?
+            .unwrap_or_default();
+        return Ok(ApiResponse::success(value));
+    }
+
     let default_value = match request.key.as_str() {
         "audio_device" => DEFAULT_AUDIO_DEVICE,
         "whisper_model_size" => DEFAULT_WHISPER_MODEL_SIZE,
         "llm_provider" => DEFAULT_LLM_PROVIDER,
-        "api_key" => DEFAULT_API_KEY,
         "api_endpoint" => DEFAULT_API_ENDPOINT,
         _ => "",
     };
@@ -65,6 +75,15 @@ pub async fn set_setting_command(
     state: State<'_, AppStateExt>,
     request: SetSettingRequest,
 ) -> Result<ApiResponse<bool>, String> {
+    // Secrets (e.g. the API key) live in the OS credential store, never SQLite.
+    if is_secret_setting(&request.key) {
+        state
+            .secret_store
+            .set(API_KEY_ACCOUNT, &request.value)
+            .map_err(|e| format!("Failed to store secret: {}", e))?;
+        return Ok(ApiResponse::success(true));
+    }
+
     let success = set_setting(&state.db, &request.key, &request.value)
         .await
         .map_err(|e| format!("Failed to set setting: {}", e))?;
@@ -80,7 +99,18 @@ pub async fn list_settings_command(
         .await
         .map_err(|e| format!("Failed to list settings: {}", e))?;
 
-    let responses: Vec<SettingResponse> = settings.into_iter().map(|s| s.into()).collect();
+    // Mask secret values (e.g. the API key) so they are never exposed through
+    // the settings listing. The UI reads secrets via `get_setting_command`.
+    let responses: Vec<SettingResponse> = settings
+        .into_iter()
+        .map(|s| {
+            let mut response: SettingResponse = s.into();
+            if is_secret_setting(&response.key) && !response.value.is_empty() {
+                response.value = "••••••••".to_string();
+            }
+            response
+        })
+        .collect();
     Ok(ApiResponse::success(responses))
 }
 
@@ -89,6 +119,22 @@ pub async fn delete_setting_command(
     state: State<'_, AppStateExt>,
     key: String,
 ) -> Result<ApiResponse<bool>, String> {
+    // Secrets (e.g. the API key) live in the OS credential store, never SQLite.
+    if is_secret_setting(&key) {
+        let deleted = state
+            .secret_store
+            .delete(API_KEY_ACCOUNT)
+            .map_err(|e| format!("Failed to delete secret: {}", e))?;
+        return if deleted {
+            Ok(ApiResponse::success(true))
+        } else {
+            Ok(ApiResponse::error(format!(
+                "Setting with key '{}' not found",
+                key
+            )))
+        };
+    }
+
     let deleted = delete_setting(&state.db, &key)
         .await
         .map_err(|e| format!("Failed to delete setting: {}", e))?;

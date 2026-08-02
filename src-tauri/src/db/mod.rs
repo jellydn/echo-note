@@ -457,11 +457,12 @@ pub async fn delete_setting(pool: &Pool<Sqlite>, key: &str) -> Result<bool> {
 
 /// Initialize default settings if they don't exist
 pub async fn init_default_settings(pool: &Pool<Sqlite>) -> Result<()> {
+    // NOTE: api_key is intentionally absent — secrets live in the macOS
+    // Keychain (see `keychain` module), never in the SQLite settings table.
     let defaults = [
         ("audio_device", DEFAULT_AUDIO_DEVICE),
         ("whisper_model_size", DEFAULT_WHISPER_MODEL_SIZE),
         ("llm_provider", DEFAULT_LLM_PROVIDER),
-        ("api_key", DEFAULT_API_KEY),
         ("api_endpoint", DEFAULT_API_ENDPOINT),
         ("first_launch_completed", DEFAULT_FIRST_LAUNCH_COMPLETED),
         (

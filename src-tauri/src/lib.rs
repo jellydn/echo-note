@@ -2,20 +2,23 @@ mod audio;
 mod commands;
 pub mod db;
 mod diarization;
+mod keychain;
 mod llm;
 mod system_audio;
 mod whisper;
 
 use audio::AudioRecorder;
 use db::init_default_settings;
+use keychain::KeychainStore;
 use serde::Serialize;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
-/// Extended app state that includes audio recording
+/// Extended app state that includes audio recording and the secret store
 pub struct AppStateExt {
     pub db: sqlx::Pool<sqlx::Sqlite>,
     pub audio_recorder: Mutex<AudioRecorder>,
+    pub secret_store: Arc<dyn keychain::SecretStore>,
 }
 
 /// Response wrapper for consistent API responses
@@ -67,6 +70,7 @@ pub fn run() {
                 app_handle.manage(AppStateExt {
                     db: db_pool,
                     audio_recorder: Mutex::new(AudioRecorder::new()),
+                    secret_store: Arc::new(KeychainStore),
                 });
                 Ok::<(), String>(())
             })

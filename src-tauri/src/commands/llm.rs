@@ -1,4 +1,5 @@
 use crate::db;
+use crate::keychain::API_KEY_ACCOUNT;
 use crate::{ApiResponse, AppStateExt};
 use db::{
     create_summary, get_setting, CreateSummaryInput, DEFAULT_API_ENDPOINT, DEFAULT_API_MODEL,
@@ -78,9 +79,12 @@ pub async fn generate_summary_command(
         .map_err(|e| format!("Failed to get LLM provider setting: {}", e))?;
 
     let result = if llm_provider == PROVIDER_API {
-        let api_key = get_setting(&state.db, "api_key", "")
-            .await
-            .map_err(|e| format!("Failed to get API key setting: {}", e))?;
+        // The API key lives in the OS credential store, never SQLite.
+        let api_key = state
+            .secret_store
+            .get(API_KEY_ACCOUNT)
+            .map_err(|e| format!("Failed to get API key: {}", e))?
+            .unwrap_or_default();
         let api_endpoint = get_setting(&state.db, "api_endpoint", DEFAULT_API_ENDPOINT)
             .await
             .map_err(|e| format!("Failed to get API endpoint setting: {}", e))?;
