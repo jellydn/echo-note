@@ -105,8 +105,15 @@ pub async fn transcribe_audio_command(
         diarization_threshold,
     };
 
+    let model_cache = std::sync::Arc::clone(&state.whisper_model_cache);
     let result = tokio::task::spawn_blocking(move || {
-        transcribe_audio_with_options(&app_handle, &audio_path, &model_size, options)
+        transcribe_audio_with_options(
+            &app_handle,
+            &audio_path,
+            &model_size,
+            options,
+            Some(&model_cache),
+        )
     })
     .await
     .map_err(|e| format!("Transcription task failed: {}", e))?
