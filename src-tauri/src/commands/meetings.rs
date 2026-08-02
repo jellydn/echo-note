@@ -1,6 +1,7 @@
 use crate::{ApiResponse, AppStateExt};
 use db::{
-    create_meeting, delete_meeting, get_meeting, list_meetings, update_meeting, CreateMeetingInput,
+    create_meeting, delete_meeting, get_meeting, list_meetings, search_meetings, update_meeting,
+    CreateMeetingInput,
 };
 use serde::{Deserialize, Deserializer, Serialize};
 use tauri::State;
@@ -141,6 +142,20 @@ pub async fn delete_meeting_command(
             id
         )))
     }
+}
+
+/// Full-text search across meeting titles, transcripts, and summaries.
+#[tauri::command]
+pub async fn search_meetings_command(
+    state: State<'_, AppStateExt>,
+    query: String,
+) -> Result<ApiResponse<Vec<MeetingResponse>>, String> {
+    let meetings = search_meetings(&state.db, &query)
+        .await
+        .map_err(|e| format!("Failed to search meetings: {}", e))?;
+
+    let responses: Vec<MeetingResponse> = meetings.into_iter().map(|m| m.into()).collect();
+    Ok(ApiResponse::success(responses))
 }
 
 #[tauri::command]

@@ -40,14 +40,13 @@ const formatDate = (dateStr: string): string => {
 		hour: "2-digit",
 		minute: "2-digit",
 	});
-};
-
-export function HistoryView({ onMeetingClick, onDeleteMeeting }: HistoryViewProps) {
+};	export function HistoryView({ onMeetingClick, onDeleteMeeting }: HistoryViewProps) {
 	const [meetings, setMeetings] = useState<Meeting[]>([]);
 	const [isLoading, setIsLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 	const [isDeleting, setIsDeleting] = useState(false);
+	const [searchQuery, setSearchQuery] = useState("");
 
 	// Fetch meetings from the database
 	const fetchMeetings = useCallback(async () => {
@@ -77,6 +76,36 @@ export function HistoryView({ onMeetingClick, onDeleteMeeting }: HistoryViewProp
 	useEffect(() => {
 		fetchMeetings();
 	}, [fetchMeetings]);
+
+	// Debounced full-text search over titles, transcripts, and summaries
+	useEffect(() => {
+		const query = searchQuery.trim();
+		if (query === "") {
+			fetchMeetings();
+			return;
+		}
+
+		setIsLoading(true);
+		setError(null);
+		const timer = setTimeout(async () => {
+			try {
+				const response = await invoke<ApiResponse<Meeting[]>>("search_meetings_command", {
+					query,
+				});
+				if (response.success && response.data) {
+					setMeetings(response.data);
+				} else {
+					setError(response.error || "Failed to search meetings");
+				}
+			} catch (err) {
+				setError(err instanceof Error ? err.message : "Failed to search meetings");
+			} finally {
+				setIsLoading(false);
+			}
+		}, 250);
+
+		return () => clearTimeout(timer);
+	}, [searchQuery, fetchMeetings]);
 
 	// Handle delete confirmation
 	const handleDeleteClick = (meetingId: number) => {
@@ -173,6 +202,16 @@ export function HistoryView({ onMeetingClick, onDeleteMeeting }: HistoryViewProp
 					<p className="history-subtitle">
 						{meetings.length} {meetings.length === 1 ? "meeting" : "meetings"} recorded
 					</p>
+					<div className="history-search">
+						<input
+							type="search"
+							className="history-search-input"
+							placeholder="Search meetings, transcripts, summaries…"
+							value={searchQuery}
+							onChange={(e) => setSearchQuery(e.target.value)}
+							aria-label="Search meetings"
+						/>
+					</div>
 				</div>
 
 				<div className="history-list">

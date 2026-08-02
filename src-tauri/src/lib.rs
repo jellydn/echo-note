@@ -89,6 +89,7 @@ pub fn run() {
             create_meeting_command,
             get_meeting_command,
             list_meetings_command,
+            search_meetings_command,
             delete_meeting_command,
             update_meeting_command,
             // Transcripts
