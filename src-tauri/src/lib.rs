@@ -1,13 +1,13 @@
-mod audio;
+pub mod audio;
 mod cleanup;
-mod commands;
+pub mod commands;
 pub mod db;
 mod diarization;
 mod export;
-mod keychain;
+pub mod keychain;
 mod llm;
 mod system_audio;
-mod whisper;
+pub mod whisper;
 
 use audio::AudioRecorder;
 use db::init_default_settings;
