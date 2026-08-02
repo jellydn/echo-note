@@ -166,6 +166,45 @@ pub async fn list_meetings(pool: &Pool<Sqlite>) -> Result<Vec<Meeting>> {
     Ok(meetings)
 }
 
+/// Full-text search over meeting titles, transcripts, and summaries using FTS5.
+/// Results are ranked by relevance and returned newest-first as a tiebreaker.
+/// Build a safe FTS5 phrase query from raw user input.
+///
+/// Doubles embedded double quotes (FTS5's escape for a literal quote inside a
+/// quoted phrase) and wraps the whole term in quotes so the text is matched
+/// literally instead of being parsed as FTS5 operators (AND/OR/NOT), which
+/// could otherwise abort the search with a syntax error.
+pub(crate) fn fts_phrase_query(query: &str) -> String {
+    let escaped = query.trim().replace('"', "\"\"");
+    format!("\"{escaped}\"")
+}
+
+pub async fn search_meetings(pool: &Pool<Sqlite>, query: &str) -> Result<Vec<Meeting>> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return list_meetings(pool).await;
+    }
+
+    // Escape the query so user input is treated as literal text, then wrap it
+    // in double quotes so FTS5 performs a phrase match.
+    let fts_query = fts_phrase_query(trimmed);
+
+    let meetings = sqlx::query_as::<_, Meeting>(
+        r#"
+        SELECT m.id, m.title, m.date, m.duration_seconds, m.audio_path, m.created_at
+        FROM meeting_search
+        JOIN meetings m ON m.id = meeting_search.rowid
+        WHERE meeting_search MATCH ?1
+        ORDER BY bm25(meeting_search), m.date DESC
+        "#,
+    )
+    .bind(fts_query)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(meetings)
+}
+
 /// Update a meeting's title
 pub async fn update_meeting(pool: &Pool<Sqlite>, id: i64, title: String) -> Result<bool> {
     let result = sqlx::query(
@@ -492,4 +531,31 @@ pub async fn init_default_settings(pool: &Pool<Sqlite>) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fts_phrase_query_wraps_plain_text() {
+        assert_eq!(fts_phrase_query("weekly sync"), "\"weekly sync\"");
+    }
+
+    #[test]
+    fn fts_phrase_query_trims_whitespace() {
+        assert_eq!(fts_phrase_query("  q2 plan  "), "\"q2 plan\"");
+    }
+
+    #[test]
+    fn fts_phrase_query_escapes_embedded_quotes() {
+        // FTS5 doubles a quote inside a quoted phrase to match it literally
+        assert_eq!(fts_phrase_query("say \"hi\" now"), "\"say \"\"hi\"\" now\"");
+    }
+
+    #[test]
+    fn fts_phrase_query_handles_operators_as_literal() {
+        // FTS5 operators are escaped so a bare user query is never parsed
+        assert_eq!(fts_phrase_query("budget AND costs"), "\"budget AND costs\"");
+    }
 }
