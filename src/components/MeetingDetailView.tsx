@@ -34,6 +34,12 @@ interface Summary {
 	created_at: string;
 }
 
+interface ExportResponse {
+	format: string;
+	content: string;
+	filename: string;
+}
+
 interface MeetingDetailViewProps {
 	meetingId: number;
 	onBack?: () => void;
@@ -131,6 +137,10 @@ export function MeetingDetailView({ meetingId, onBack }: MeetingDetailViewProps)
 	// Copy state
 	const [copiedSection, setCopiedSection] = useState<string | null>(null);
 
+	// Export state
+	const [isExporting, setIsExporting] = useState(false);
+	const [exportMessage, setExportMessage] = useState<string | null>(null);
+
 	// Fetch meeting data
 	const fetchMeetingData = useCallback(async () => {
 		setIsLoading(true);
@@ -227,6 +237,33 @@ export function MeetingDetailView({ meetingId, onBack }: MeetingDetailViewProps)
 		if (success) {
 			setCopiedSection(section);
 			setTimeout(() => setCopiedSection(null), 2000);
+		}
+	};
+
+	// Export the meeting notes as Markdown (copies to clipboard for archiving/sharing)
+	const handleExport = async (): Promise<void> => {
+		setIsExporting(true);
+		setExportMessage(null);
+		try {
+			const response = await invoke<ApiResponse<ExportResponse>>("export_meeting_command", {
+				meetingId,
+				format: "markdown",
+			});
+			if (response.success && response.data) {
+				const success = await copyToClipboard(response.data.content);
+				setExportMessage(
+					success
+						? `Exported ${response.data.filename} — Markdown copied to clipboard.`
+						: "Exported. Copy the text from the transcript card.",
+				);
+				setTimeout(() => setExportMessage(null), 4000);
+			} else {
+				setError(response.error || "Failed to export meeting");
+			}
+		} catch (err) {
+			setError(err instanceof Error ? err.message : "Failed to export meeting");
+		} finally {
+			setIsExporting(false);
 		}
 	};
 
@@ -350,12 +387,22 @@ export function MeetingDetailView({ meetingId, onBack }: MeetingDetailViewProps)
 								✏️
 							</button>
 						</div>
-					)}
+					)}{" "}
 					<div className="meeting-detail-meta">
 						<span className="meta-item">📅 {formatDate(meeting.date)}</span>
 						<span className="meta-separator">•</span>
 						<span className="meta-item">⏱ {formatDuration(meeting.duration_seconds)}</span>
+						<span className="meta-separator">•</span>
+						<button
+							type="button"
+							className="export-button"
+							onClick={handleExport}
+							disabled={isExporting}
+						>
+							{isExporting ? "Exporting..." : "📤 Export"}
+						</button>
 					</div>
+					{exportMessage && <p className="export-message">{exportMessage}</p>}
 				</div>
 
 				{/* Content Grid */}
