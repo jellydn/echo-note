@@ -200,4 +200,198 @@ describe("SettingsView", () => {
 			expect(screen.getByText(/No model downloaded yet/i)).toBeInTheDocument();
 		});
 	});
+
+	describe("storage usage", () => {
+		it("shows storage usage when data is available", async () => {
+			vi.mocked(invoke).mockImplementation(async (command: string, args?: unknown) => {
+				if (command === "get_storage_usage_command") {
+					return {
+						success: true,
+						data: {
+							file_count: 5,
+							total_bytes: 524288000,
+							recordings_dir: "/tmp/recordings",
+						},
+						error: null,
+					};
+				}
+				const base = createMockInvoke();
+				return base(command, args);
+			});
+
+			render(<SettingsView />);
+
+			await waitFor(() => {
+				expect(screen.getByText("Settings")).toBeInTheDocument();
+			});
+
+			await waitFor(() => {
+				expect(screen.getByText(/5 recordings using 500 MB/)).toBeInTheDocument();
+			});
+		});
+
+		it("shows empty storage state when no recordings exist", async () => {
+			// With 0 files, the component still shows "0 recordings using 0 MB"
+			vi.mocked(invoke).mockImplementation(async (command: string, args?: unknown) => {
+				if (command === "get_storage_usage_command") {
+					return {
+						success: true,
+						data: {
+							file_count: 0,
+							total_bytes: 0,
+							recordings_dir: "/tmp/recordings",
+						},
+						error: null,
+					};
+				}
+				const base = createMockInvoke();
+				return base(command, args);
+			});
+
+			render(<SettingsView />);
+
+			await waitFor(() => {
+				expect(screen.getByText("Storage & Cleanup")).toBeInTheDocument();
+			});
+
+			await waitFor(() => {
+				expect(screen.getByText(/0 recordings using 0 MB/)).toBeInTheDocument();
+			});
+		});
+
+		it("shows cleanup button and calls cleanup on click", async () => {
+			vi.mocked(invoke).mockImplementation(async (command: string, args?: unknown) => {
+				if (command === "get_storage_usage_command") {
+					return {
+						success: true,
+						data: {
+							file_count: 3,
+							total_bytes: 314572800,
+							recordings_dir: "/tmp/recordings",
+						},
+						error: null,
+					};
+				}
+				if (command === "cleanup_old_recordings_command") {
+					return {
+						success: true,
+						data: {
+							deleted_count: 2,
+							freed_bytes: 209715200,
+							retention_days: 30,
+						},
+						error: null,
+					};
+				}
+				const base = createMockInvoke();
+				return base(command, args);
+			});
+
+			render(<SettingsView />);
+
+			await waitFor(() => {
+				expect(screen.getByText("Storage & Cleanup")).toBeInTheDocument();
+			});
+
+			// Click the cleanup button
+			const cleanupButton = screen.getByRole("button", {
+				name: /clean up old recordings/i,
+			});
+			await userEvent.click(cleanupButton);
+
+			await waitFor(() => {
+				expect(
+					screen.getByText(/Removed 2 recording/),
+				).toBeInTheDocument();
+			});
+		});
+
+		it("shows no-removals message when cleanup finds nothing to delete", async () => {
+			vi.mocked(invoke).mockImplementation(async (command: string, args?: unknown) => {
+				if (command === "get_storage_usage_command") {
+					return {
+						success: true,
+						data: {
+							file_count: 3,
+							total_bytes: 314572800,
+							recordings_dir: "/tmp/recordings",
+						},
+						error: null,
+					};
+				}
+				if (command === "cleanup_old_recordings_command") {
+					return {
+						success: true,
+						data: {
+							deleted_count: 0,
+							freed_bytes: 0,
+							retention_days: 30,
+						},
+						error: null,
+					};
+				}
+				const base = createMockInvoke();
+				return base(command, args);
+			});
+
+			render(<SettingsView />);
+
+			await waitFor(() => {
+				expect(screen.getByText("Storage & Cleanup")).toBeInTheDocument();
+			});
+
+			const cleanupButton = screen.getByRole("button", {
+				name: /clean up old recordings/i,
+			});
+			await userEvent.click(cleanupButton);
+
+			await waitFor(() => {
+				expect(
+					screen.getByText(/No recordings exceeded the retention policy/),
+				).toBeInTheDocument();
+			});
+		});
+
+		it("shows error when cleanup fails", async () => {
+			vi.mocked(invoke).mockImplementation(async (command: string, args?: unknown) => {
+				if (command === "get_storage_usage_command") {
+					return {
+						success: true,
+						data: {
+							file_count: 3,
+							total_bytes: 314572800,
+							recordings_dir: "/tmp/recordings",
+						},
+						error: null,
+					};
+				}
+				if (command === "cleanup_old_recordings_command") {
+					return {
+						success: false,
+						data: null,
+						error: "Permission denied",
+					};
+				}
+				const base = createMockInvoke();
+				return base(command, args);
+			});
+
+			render(<SettingsView />);
+
+			await waitFor(() => {
+				expect(screen.getByText("Storage & Cleanup")).toBeInTheDocument();
+			});
+
+			const cleanupButton = screen.getByRole("button", {
+				name: /clean up old recordings/i,
+			});
+			await userEvent.click(cleanupButton);
+
+			await waitFor(() => {
+				expect(
+					screen.getByText("Permission denied"),
+				).toBeInTheDocument();
+			});
+		});
+	});
 });
