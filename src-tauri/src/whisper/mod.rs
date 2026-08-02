@@ -1,12 +1,106 @@
 use anyhow::{Context, Result};
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
+use whisper_rs::WhisperContext;
 
 use crate::diarization::{
     create_onnx_embedder, diarize, SegmentSpan, DEFAULT_SIMILARITY_THRESHOLD,
 };
+
+/// Maximum number of Whisper model contexts kept in memory at once. Users
+/// typically switch between at most two sizes (e.g. "small" and
+/// "small-q5_1"), so a tiny bounded cache is enough to reap most of the
+/// benefit while still accounting for memory pressure.
+pub const MAX_CACHED_WHISPER_MODELS: usize = 2;
+
+/// A small, bounded cache keyed by model size. Keeps expensive loaded
+/// resources (e.g. Whisper model contexts) alive across command calls and
+/// evicts the oldest entry when the cache grows beyond capacity.
+#[derive(Debug)]
+pub struct ModelCache<T> {
+    entries: HashMap<String, T>,
+    order: VecDeque<String>,
+    max_entries: usize,
+}
+
+impl<T> Default for ModelCache<T> {
+    fn default() -> Self {
+        Self::with_capacity(MAX_CACHED_WHISPER_MODELS)
+    }
+}
+
+impl<T> ModelCache<T> {
+    pub fn with_capacity(max_entries: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+            max_entries: max_entries.max(1),
+        }
+    }
+
+    pub fn get(&self, key: &str) -> Option<&T> {
+        self.entries.get(key)
+    }
+
+    /// Insert (or replace) an entry, evicting the oldest entries beyond
+    /// capacity so the cache stays memory-bounded.
+    pub fn insert(&mut self, key: String, value: T) {
+        if !self.entries.contains_key(&key) {
+            self.order.push_back(key.clone());
+        }
+        self.entries.insert(key, value);
+        while self.order.len() > self.max_entries {
+            if let Some(oldest) = self.order.pop_front() {
+                self.entries.remove(&oldest);
+            }
+        }
+    }
+
+    /// Remove a specific entry (e.g. when the selected model changes or a
+    /// loaded model turns out to be stale).
+    pub fn remove(&mut self, key: &str) -> Option<T> {
+        self.order.retain(|k| k != key);
+        self.entries.remove(key)
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.order.clear();
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Return a reference to the entry for `key`, loading it with `load` when
+    /// absent. If `load` fails, any stale entry is dropped and the error is
+    /// returned, so the next call retries cleanly.
+    pub fn get_or_load<F>(&mut self, key: &str, load: F) -> Result<&T>
+    where
+        F: FnOnce() -> Result<T>,
+    {
+        if !self.entries.contains_key(key) {
+            match load() {
+                Ok(value) => self.insert(key.to_string(), value),
+                Err(e) => {
+                    self.remove(key);
+                    return Err(e);
+                }
+            }
+        }
+        Ok(self.entries.get(key).expect("entry exists after load"))
+    }
+}
+
+/// Cache of loaded Whisper model contexts, keyed by model size.
+pub type WhisperModelCache = ModelCache<WhisperContext>;
 
 /// Whisper model sizes supported (name, filename, expected_bytes, display_label)
 pub const WHISPER_MODELS: &[(&str, &str, u64, &str)] = &[
@@ -298,28 +392,31 @@ pub fn transcribe_audio(
         audio_path,
         model_size,
         TranscriptionOptions::default(),
+        None,
     )
 }
 
 /// Transcribe audio file using Whisper, controlling pipeline options
 /// (e.g. whether to run speaker diarization).
+///
+/// When `model_cache` is provided, the loaded model context is cached by
+/// model size and reused across calls, avoiding a costly reload per command.
 pub fn transcribe_audio_with_options(
     app_handle: &AppHandle,
     audio_path: &str,
     model_size: &str,
     options: TranscriptionOptions,
+    model_cache: Option<&std::sync::Mutex<WhisperModelCache>>,
 ) -> Result<TranscriptionResult> {
     use hound::WavReader;
     use std::time::Instant;
-    use whisper_rs::{FullParams, WhisperContext, WhisperContextParameters};
+    use whisper_rs::{FullParams, WhisperContextParameters};
 
     let start_time = Instant::now();
 
     // Get model path
     let model_path = get_model_path(app_handle, model_size)?
         .ok_or_else(|| anyhow::anyhow!("Model {} not downloaded", model_size))?;
-
-    log::info!("Loading Whisper model from {:?}", model_path);
 
     // Emit initial progress
     let _ = app_handle.emit(
@@ -330,18 +427,40 @@ pub fn transcribe_audio_with_options(
         },
     );
 
-    // Load the model
     let ctx_params = WhisperContextParameters::default();
     let model_path_str = model_path
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("Model path contains invalid UTF-8: {:?}", model_path))?;
-    let ctx = WhisperContext::new_with_params(model_path_str, ctx_params)
-        .map_err(|e| anyhow::anyhow!("Failed to load Whisper model: {:?}", e))?;
 
-    // Create state for transcription
-    let mut state = ctx
-        .create_state()
-        .map_err(|e| anyhow::anyhow!("Failed to create Whisper state: {:?}", e))?;
+    // Load (or reuse) the model context, then create per-call transcription
+    // state. With a cache, the context is borrowed only long enough to create
+    // the state, so concurrent transcriptions proceed independently.
+    let mut state = match model_cache {
+        Some(cache) => {
+            log::info!("Using cached Whisper model context for '{}'", model_size);
+            let mut guard = cache
+                .lock()
+                .map_err(|e| anyhow::anyhow!("Failed to lock model cache: {}", e))?;
+            let context = guard
+                .get_or_load(model_size, || {
+                    log::info!("Loading Whisper model from {:?}", model_path);
+                    WhisperContext::new_with_params(model_path_str, ctx_params)
+                        .map_err(|e| anyhow::anyhow!("Failed to load Whisper model: {:?}", e))
+                })
+                .map_err(|e| anyhow::anyhow!("Failed to load Whisper model: {}", e))?;
+            context
+                .create_state()
+                .map_err(|e| anyhow::anyhow!("Failed to create Whisper state: {:?}", e))?
+        }
+        None => {
+            log::info!("Loading Whisper model from {:?}", model_path);
+            let context = WhisperContext::new_with_params(model_path_str, ctx_params)
+                .map_err(|e| anyhow::anyhow!("Failed to load Whisper model: {:?}", e))?;
+            context
+                .create_state()
+                .map_err(|e| anyhow::anyhow!("Failed to create Whisper state: {:?}", e))?
+        }
+    };
 
     // Emit progress
     let _ = app_handle.emit(
@@ -615,6 +734,85 @@ fn pcm_i16_to_mono_f32(samples: &[i16], channels: u16) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_cache_loads_once_and_reuses() {
+        let mut cache = ModelCache::<u32>::default();
+        let mut loads = 0;
+
+        for _ in 0..3 {
+            let value = cache.get_or_load("small", || {
+                loads += 1;
+                Ok(42)
+            });
+            assert_eq!(value.unwrap(), &42);
+        }
+
+        assert_eq!(loads, 1);
+    }
+
+    #[test]
+    fn model_cache_evicts_oldest_beyond_capacity() {
+        let mut cache = ModelCache::<u32>::with_capacity(2);
+
+        cache.insert("tiny".to_string(), 1);
+        cache.insert("base".to_string(), 2);
+        cache.insert("small".to_string(), 3);
+
+        assert!(cache.get("tiny").is_none(), "oldest entry should be evicted");
+        assert_eq!(cache.get("base"), Some(&2));
+        assert_eq!(cache.get("small"), Some(&3));
+        assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn model_cache_replaces_existing_key_without_duplicating() {
+        let mut cache = ModelCache::<u32>::with_capacity(2);
+
+        cache.insert("small".to_string(), 1);
+        cache.insert("small".to_string(), 2);
+
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache.get("small"), Some(&2));
+    }
+
+    #[test]
+    fn model_cache_hit_does_not_reload() {
+        let mut cache = ModelCache::<u32>::default();
+        cache.insert("small".to_string(), 1);
+
+        // A hit never invokes the loader, so a failing loader is harmless.
+        let result = cache.get_or_load("small", || Err(anyhow::anyhow!("should not load")));
+        assert_eq!(result.unwrap(), &1);
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn model_cache_load_failure_returns_error_and_keeps_cache_clean() {
+        let mut cache = ModelCache::<u32>::default();
+
+        let result = cache.get_or_load("small", || Err(anyhow::anyhow!("model file corrupt")));
+        assert!(result.is_err());
+        assert!(cache.is_empty(), "failed load must not leave an entry");
+
+        // A subsequent load succeeds and repopulates.
+        let value = cache.get_or_load("small", || Ok(7));
+        assert_eq!(value.unwrap(), &7);
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn model_cache_remove_and_clear() {
+        let mut cache = ModelCache::<u32>::default();
+        cache.insert("a".to_string(), 1);
+        cache.insert("b".to_string(), 2);
+
+        assert_eq!(cache.remove("a"), Some(1));
+        assert!(cache.get("a").is_none());
+
+        cache.clear();
+        assert!(cache.is_empty());
+    }
 
     #[test]
     fn test_get_model_filename() {

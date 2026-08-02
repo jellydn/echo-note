@@ -13,12 +13,14 @@ use keychain::KeychainStore;
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
+use whisper::WhisperModelCache;
 
 /// Extended app state that includes audio recording and the secret store
 pub struct AppStateExt {
     pub db: sqlx::Pool<sqlx::Sqlite>,
     pub audio_recorder: Mutex<AudioRecorder>,
     pub secret_store: Arc<dyn keychain::SecretStore>,
+    pub whisper_model_cache: Arc<Mutex<WhisperModelCache>>,
 }
 
 /// Response wrapper for consistent API responses
@@ -71,6 +73,7 @@ pub fn run() {
                     db: db_pool,
                     audio_recorder: Mutex::new(AudioRecorder::new()),
                     secret_store: Arc::new(KeychainStore),
+                    whisper_model_cache: Arc::new(Mutex::new(WhisperModelCache::default())),
                 });
                 Ok::<(), String>(())
             })
