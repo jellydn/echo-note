@@ -3,6 +3,7 @@ mod cleanup;
 mod commands;
 pub mod db;
 mod diarization;
+mod export;
 mod keychain;
 mod llm;
 mod system_audio;
@@ -53,7 +54,8 @@ impl<T> ApiResponse<T> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     use commands::{
-        audio::*, llm::*, meetings::*, settings::*, summaries::*, transcription::*, transcripts::*,
+        audio::*, export::*, llm::*, meetings::*, settings::*, summaries::*, transcription::*,
+        transcripts::*,
     };
 
     let app = tauri::Builder::default()
@@ -134,6 +136,8 @@ pub fn run() {
             // LLM / summaries
             check_ollama_status_command,
             generate_summary_command,
+            // Export
+            export_meeting_command,
         ]);
 
     if let Err(err) = app.run(tauri::generate_context!()) {
