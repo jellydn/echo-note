@@ -3,7 +3,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample};
 use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -18,6 +18,21 @@ pub const MAX_RECORDING_DURATION_SECS: u64 = 2 * 60 * 60;
 /// Convert a max duration and sample rate into a sample-count cap.
 fn max_samples_for(sample_rate: u32) -> usize {
     (MAX_RECORDING_DURATION_SECS * u64::from(sample_rate)) as usize
+}
+
+/// Build a recording file path that won't clobber an existing file.
+///
+/// Two recordings stopped within the same second would share the same
+/// `recording_YYYYMMDD_HHMMSS.wav` name, and the second write would silently
+/// overwrite the first. Append `_1`, `_2`, ... until a free name is found.
+fn next_recording_path(output_dir: &Path, timestamp: &str) -> PathBuf {
+    let mut candidate = output_dir.join(format!("recording_{timestamp}.wav"));
+    let mut n = 1u32;
+    while candidate.exists() {
+        candidate = output_dir.join(format!("recording_{timestamp}_{n}.wav"));
+        n += 1;
+    }
+    candidate
 }
 
 /// Recording control messages
@@ -298,10 +313,11 @@ impl AudioRecorder {
         let output_sample_rate = mic_data.as_ref().map(|s| s.sample_rate).unwrap_or(16000);
         let used_system_audio = system_data.is_some();
 
-        // Generate filename with timestamp
+        // Generate filename with timestamp, deduplicating when two recordings
+        // stop within the same second so the second write never clobbers the
+        // first.
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
-        let filename = format!("recording_{}.wav", timestamp);
-        let file_path = output_dir.join(&filename);
+        let file_path = next_recording_path(&output_dir, &timestamp);
 
         // Create output directory if needed
         std::fs::create_dir_all(&output_dir)?;
@@ -882,6 +898,29 @@ pub fn get_recordings_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn next_recording_path_deduplicates_same_second_stops() {
+        let dir = std::env::temp_dir().join(format!(
+            "echo-note-audio-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let timestamp = "20260730_120000";
+        let first = next_recording_path(&dir, timestamp);
+        assert_eq!(first, dir.join("recording_20260730_120000.wav"));
+        std::fs::write(&first, b"first").unwrap();
+
+        let second = next_recording_path(&dir, timestamp);
+        assert_eq!(second, dir.join("recording_20260730_120000_1.wav"));
+        std::fs::write(&second, b"second").unwrap();
+
+        let third = next_recording_path(&dir, timestamp);
+        assert_eq!(third, dir.join("recording_20260730_120000_2.wav"));
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn max_samples_for_scales_with_sample_rate() {
