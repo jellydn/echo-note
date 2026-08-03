@@ -329,6 +329,41 @@ const summaries: Summary[] = [
 	},
 ];
 
+// Whisper model catalog, shared by the model-list and download commands.
+interface WhisperModelInfo {
+	size: string;
+	filename: string;
+	expected_size: number;
+	is_downloaded: boolean;
+}
+
+const WHISPER_MODELS: WhisperModelInfo[] = [
+	{ size: "tiny", filename: "ggml-tiny.bin", expected_size: 75_080_000, is_downloaded: true },
+	{ size: "base", filename: "ggml-base.bin", expected_size: 142_000_000, is_downloaded: true },
+	{ size: "small", filename: "ggml-small.bin", expected_size: 466_000_000, is_downloaded: true },
+	{
+		size: "medium",
+		filename: "ggml-medium.bin",
+		expected_size: 1_535_000_000,
+		is_downloaded: false,
+	},
+	{
+		size: "large-v3",
+		filename: "ggml-large-v3.bin",
+		expected_size: 2_970_000_000,
+		is_downloaded: false,
+	},
+];
+
+// Diarization model, shared by the status and download commands.
+const DIARIZATION_MODEL = {
+	id: "pyannote/speaker-diarization-3.1",
+	filename: "diarize-3.1.onnx",
+	expected_size: 173_000_000,
+	is_downloaded: true,
+	model_path: "/tmp/echonote/models/diarize-3.1.onnx",
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -347,6 +382,20 @@ const findTranscript = (meetingId: number): Transcript | undefined =>
 
 const findSummary = (meetingId: number): Summary | undefined =>
 	summaries.find((s) => s.meeting_id === meetingId);
+
+const sortedMeetings = (): Meeting[] => [...meetings].sort((a, b) => b.id - a.id);
+
+// Resolve a whisper model by size, defaulting to "small" for unknown sizes.
+const findWhisperModel = (size: string): WhisperModelInfo =>
+	WHISPER_MODELS.find((m) => m.size === size) ??
+	WHISPER_MODELS.find((m) => m.size === "small") ??
+	WHISPER_MODELS[0];
+
+const meetingNotFound = (): ApiResponse<never> => ({
+	success: false,
+	data: null,
+	error: "Meeting not found",
+});
 
 // Build a plausible multi-speaker transcript for a freshly recorded meeting.
 const buildTranscriptFor = (title: string, durationSeconds: number): string => {
@@ -369,9 +418,9 @@ const buildTranscriptFor = (title: string, durationSeconds: number): string => {
 	return lines.join("\n");
 };
 
-const buildSummaryFor = (title: string): Summary => ({
+const buildSummaryFor = (title: string, meetingId: number): Summary => ({
 	id: nextId(summaries),
-	meeting_id: 0, // patched by caller
+	meeting_id: meetingId,
 	key_points: [
 		`- Discussed "${title}" with agreed next steps`,
 		"- Captured the transcript and generated this summary automatically",
@@ -467,7 +516,13 @@ const handleCommand = async (cmd: string, args?: InvokeArgs): Promise<unknown> =
 		case "install_blackhole_homebrew_command":
 		case "install_blackhole_bundled_command":
 			config.blackholeInstalled = true;
-			return cmd === "auto_install_blackhole_command" ? ok({ method: "bundled" }) : ok(true);
+			return cmd === "auto_install_blackhole_command"
+				? ok({
+						success: true,
+						method: "bundled",
+						message: "BlackHole installed successfully from bundled package",
+					})
+				: ok(true);
 		case "check_homebrew_status_command":
 			return ok(true);
 
@@ -489,28 +544,26 @@ const handleCommand = async (cmd: string, args?: InvokeArgs): Promise<unknown> =
 
 		// --- Meetings ---
 		case "list_meetings_command":
-			return ok([...meetings].sort((a, b) => b.id - a.id));
+			return ok(sortedMeetings());
 		case "search_meetings_command": {
 			const query = String(a.query ?? "")
 				.trim()
 				.toLowerCase();
-			if (!query) return ok([...meetings].sort((a, b) => b.id - a.id));
+			if (!query) return ok(sortedMeetings());
 			return ok(
-				meetings
-					.filter((meeting) => {
-						const transcript = findTranscript(meeting.id);
-						return (
-							meeting.title.toLowerCase().includes(query) ||
-							(transcript?.content.toLowerCase().includes(query) ?? false)
-						);
-					})
-					.sort((a, b) => b.id - a.id),
+				sortedMeetings().filter((meeting) => {
+					const transcript = findTranscript(meeting.id);
+					return (
+						meeting.title.toLowerCase().includes(query) ||
+						(transcript?.content.toLowerCase().includes(query) ?? false)
+					);
+				}),
 			);
 		}
 		case "get_meeting_command": {
 			const id = Number(a.id);
 			const meeting = findMeeting(id);
-			return meeting ? ok(meeting) : { success: false, data: null, error: "Meeting not found" };
+			return meeting ? ok(meeting) : meetingNotFound();
 		}
 		case "create_meeting_command": {
 			const request = (a.request ?? {}) as Record<string, unknown>;
@@ -529,14 +582,14 @@ const handleCommand = async (cmd: string, args?: InvokeArgs): Promise<unknown> =
 		case "update_meeting_command": {
 			const id = Number(a.id);
 			const meeting = findMeeting(id);
-			if (!meeting) return { success: false, data: null, error: "Meeting not found" };
+			if (!meeting) return meetingNotFound();
 			meeting.title = String(a.title ?? meeting.title);
 			return ok(meeting);
 		}
 		case "delete_meeting_command": {
 			const id = Number(a.id);
 			const index = meetings.findIndex((m) => m.id === id);
-			if (index === -1) return { success: false, data: null, error: "Meeting not found" };
+			if (index === -1) return meetingNotFound();
 			meetings.splice(index, 1);
 			const tIndex = transcripts.findIndex((t) => t.meeting_id === id);
 			if (tIndex !== -1) transcripts.splice(tIndex, 1);
@@ -588,8 +641,7 @@ const handleCommand = async (cmd: string, args?: InvokeArgs): Promise<unknown> =
 		case "generate_summary_command": {
 			const meetingId = Number(a.meetingId);
 			await delay(900);
-			const summary = buildSummaryFor(findMeeting(meetingId)?.title ?? "Meeting");
-			summary.meeting_id = meetingId;
+			const summary = buildSummaryFor(findMeeting(meetingId)?.title ?? "Meeting", meetingId);
 			summaries.push(summary);
 			return ok({
 				summary_id: summary.id,
@@ -604,7 +656,7 @@ const handleCommand = async (cmd: string, args?: InvokeArgs): Promise<unknown> =
 		case "export_meeting_command": {
 			const meetingId = Number(a.meetingId);
 			const meeting = findMeeting(meetingId);
-			if (!meeting) return { success: false, data: null, error: "Meeting not found" };
+			if (!meeting) return meetingNotFound();
 			return ok({
 				format: String(a.format ?? "markdown"),
 				content: buildMarkdownExport(meeting),
@@ -614,7 +666,8 @@ const handleCommand = async (cmd: string, args?: InvokeArgs): Promise<unknown> =
 
 		// --- Settings ---
 		case "get_setting_command": {
-			const key = String(a.key ?? "");
+			const request = (a.request ?? {}) as Record<string, unknown>;
+			const key = String(request.key ?? "");
 			return ok(settings.get(key) ?? "");
 		}
 		case "set_setting_command": {
@@ -634,68 +687,26 @@ const handleCommand = async (cmd: string, args?: InvokeArgs): Promise<unknown> =
 				{ id: "USB_Mic", name: "External USB Microphone" },
 			]);
 		case "list_whisper_models_command":
-			return ok([
-				{
-					size: "tiny",
-					filename: "ggml-tiny.bin",
-					expected_size: 75_080_000,
-					is_downloaded: true,
-					actual_size: 75_080_000,
-				},
-				{
-					size: "base",
-					filename: "ggml-base.bin",
-					expected_size: 142_000_000,
-					is_downloaded: true,
-					actual_size: 142_000_000,
-				},
-				{
-					size: "small",
-					filename: "ggml-small.bin",
-					expected_size: 466_000_000,
-					is_downloaded: true,
-					actual_size: 466_000_000,
-				},
-				{
-					size: "medium",
-					filename: "ggml-medium.bin",
-					expected_size: 1_535_000_000,
-					is_downloaded: false,
-					actual_size: null,
-				},
-				{
-					size: "large-v3",
-					filename: "ggml-large-v3.bin",
-					expected_size: 2_970_000_000,
-					is_downloaded: false,
-					actual_size: null,
-				},
-			]);
+			return ok(
+				WHISPER_MODELS.map((model) => ({
+					...model,
+					actual_size: model.is_downloaded ? model.expected_size : null,
+				})),
+			);
 		case "check_diarization_status_command":
 			return ok({
-				id: "pyannote/speaker-diarization-3.1",
-				filename: "diarize-3.1.onnx",
-				expected_size: 173_000_000,
-				is_downloaded: true,
-				actual_size: 173_000_000,
-				model_path: "/tmp/echonote/models/diarize-3.1.onnx",
+				...DIARIZATION_MODEL,
+				actual_size: DIARIZATION_MODEL.is_downloaded ? DIARIZATION_MODEL.expected_size : null,
 			});
 		case "download_whisper_model_command": {
-			const modelSize = String(a.model_size ?? "small");
-			const models = [
-				{ size: "tiny", bytes: 75_080_000 },
-				{ size: "base", bytes: 142_000_000 },
-				{ size: "small", bytes: 466_000_000 },
-				{ size: "medium", bytes: 1_535_000_000 },
-				{ size: "large-v3", bytes: 2_970_000_000 },
-			];
-			const model = models.find((m) => m.size === modelSize) ?? models[2];
+			const modelSize = String(a.modelSize ?? "small");
+			const model = findWhisperModel(modelSize);
 			await emitProgress(
 				"whisper-download-progress",
 				(fraction) => ({
 					model_size: model.size,
-					bytes_downloaded: Math.round(model.bytes * fraction),
-					total_bytes: model.bytes,
+					bytes_downloaded: Math.round(model.expected_size * fraction),
+					total_bytes: model.expected_size,
 					percentage: Math.round(fraction * 100),
 				}),
 				8,
@@ -703,11 +714,11 @@ const handleCommand = async (cmd: string, args?: InvokeArgs): Promise<unknown> =
 			return ok(`Downloaded ${model.size} model (${modelSize})`);
 		}
 		case "download_diarization_model_command": {
-			const total = 173_000_000;
+			const total = DIARIZATION_MODEL.expected_size;
 			await emitProgress(
 				"diarization-download-progress",
 				(fraction) => ({
-					model_id: "pyannote/speaker-diarization-3.1",
+					model_id: DIARIZATION_MODEL.id,
 					bytes_downloaded: Math.round(total * fraction),
 					total_bytes: total,
 					percentage: Math.round(fraction * 100),
@@ -730,7 +741,7 @@ const handleCommand = async (cmd: string, args?: InvokeArgs): Promise<unknown> =
 			return ok({
 				file_count: meetings.length * 2,
 				total_bytes,
-				recordings_dir: "/Users/you/Library/Application Support/com.echonote.app/recordings",
+				recordings_dir: "/tmp/echonote/recordings",
 			});
 		}
 		case "cleanup_old_recordings_command":
@@ -739,8 +750,13 @@ const handleCommand = async (cmd: string, args?: InvokeArgs): Promise<unknown> =
 		// --- Misc ---
 		case "open_models_folder_command":
 			return ok(true);
-		case "plugin:opener|open_url":
+		case "plugin:opener|open_url": {
+			// The real opener plugin launches the system browser. In a plain
+			// browser, open a tab instead so links stay usable in the preview.
+			const url = String(a.url ?? "");
+			if (url) window.open(url, "_blank", "noopener");
 			return null;
+		}
 
 		default:
 			console.warn(`[tauri-mock] Unhandled command: ${cmd}`, args);
