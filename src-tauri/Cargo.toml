@@ -37,7 +37,7 @@ uuid = { version = "1", features = ["v4"] }
 ort = "=2.0.0-rc.10"
 ndarray = "0.16"
 rustfft = "6"
-keyring = "3"
+keyring = "4"
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
