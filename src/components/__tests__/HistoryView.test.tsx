@@ -226,9 +226,7 @@ describe("HistoryView", () => {
 			});
 
 			expect(
-				screen.getByPlaceholderText(
-					"Search meetings, transcripts, summaries…",
-				),
+				screen.getByPlaceholderText("Search meetings, transcripts, summaries…"),
 			).toBeInTheDocument();
 		});
 

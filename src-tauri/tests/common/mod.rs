@@ -34,6 +34,7 @@ pub async fn setup_test_db() -> Pool<Sqlite> {
 }
 
 /// Helper to create a test meeting
+#[allow(dead_code)] // shared across integration test binaries
 pub async fn create_test_meeting(pool: &Pool<Sqlite>, title: &str) -> i64 {
     let input = CreateMeetingInput {
         title: title.to_string(),
@@ -48,6 +49,7 @@ pub async fn create_test_meeting(pool: &Pool<Sqlite>, title: &str) -> i64 {
 }
 
 /// Helper to create a test transcript
+#[allow(dead_code)] // shared across integration test binaries
 pub async fn create_test_transcript(pool: &Pool<Sqlite>, meeting_id: i64, content: &str) -> i64 {
     let input = CreateTranscriptInput {
         meeting_id,
@@ -60,6 +62,7 @@ pub async fn create_test_transcript(pool: &Pool<Sqlite>, meeting_id: i64, conten
 }
 
 /// Helper to create a test summary
+#[allow(dead_code)] // shared across integration test binaries
 pub async fn create_test_summary(
     pool: &Pool<Sqlite>,
     meeting_id: i64,
