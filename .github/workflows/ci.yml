@@ -31,6 +31,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      # The export-fidelity differential test (tests/export_fidelity.rs) spawns
+      # `bun scripts/export-diff.mts` to render the shared fixture through the
+      # TS mock builders, so the Rust job needs bun on PATH.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
       - name: Check
         run: cargo check --all-targets
       - name: Clippy
