@@ -19,6 +19,11 @@ import { mockIPC } from "@tauri-apps/api/mocks";
  * - Progress events (`transcription-progress`, `whisper-download-progress`,
  *   `diarization-download-progress`) are emitted during simulated async work.
  *
+ * Onboarding paths are previewable via URL flags, read at install time:
+ * `?firstLaunch=1` boots into the SetupWizard, and `?blackhole=0` simulates a
+ * missing BlackHole driver (Record banner / Settings install states). Flags
+ * only affect the mock — native Tauri builds never read them.
+ *
  * It only activates when no real Tauri shell is present, so native builds are
  * completely unaffected.
  */
@@ -69,10 +74,22 @@ interface MockConfig {
 // Config + store
 // ---------------------------------------------------------------------------
 
-const config: MockConfig = {
-	firstLaunch: false,
-	blackholeInstalled: true,
+// Parse browser-only demo flags from the URL (e.g. "?firstLaunch=1&blackhole=0").
+// Exported for unit tests; native Tauri builds never reach this code.
+export const parseMockConfig = (search: string = window.location.search): MockConfig => {
+	const params = new URLSearchParams(search);
+	const flag = (name: string, fallback: boolean): boolean => {
+		const raw = params.get(name);
+		if (raw === null) return fallback;
+		return raw === "1" || raw.toLowerCase() === "true";
+	};
+	return {
+		firstLaunch: flag("firstLaunch", false),
+		blackholeInstalled: flag("blackhole", true),
+	};
 };
+
+const config: MockConfig = parseMockConfig();
 
 // In-memory settings table (keys mirror SettingsView's SETTING_* constants).
 const settings = new Map<string, string>([
@@ -838,5 +855,8 @@ export function installTauriMock(): void {
 	if (installed || hasRealTauri()) return;
 	installed = true;
 	mockIPC(handleCommand, { shouldMockEvents: true });
-	console.info("[tauri-mock] Browser preview active — serving mocked Tauri commands.");
+	console.info(
+		"[tauri-mock] Browser preview active — serving mocked Tauri commands. " +
+			"Flags: ?firstLaunch=1 (SetupWizard), ?blackhole=0 (no BlackHole).",
+	);
 }
