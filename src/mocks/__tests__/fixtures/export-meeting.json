@@ -1,0 +1,180 @@
+{
+	"cases": [
+		{
+			"name": "full",
+			"meeting": {
+				"id": 1,
+				"title": "Weekly Sync",
+				"date": "2026-05-06T15:56:00Z",
+				"duration_seconds": 3605,
+				"audio_path": "/tmp/rec.wav",
+				"created_at": "2026-05-06T16:00:00Z"
+			},
+			"transcript": {
+				"id": 1,
+				"meeting_id": 1,
+				"content": "[00:00] Speaker 1: Hello world\n[00:05] Speaker 2: Let's start",
+				"created_at": "2026-05-06T16:00:00Z"
+			},
+			"summary": {
+				"id": 1,
+				"meeting_id": 1,
+				"key_points": "- Discussed Q2 plan\n\n- Confirmed launch date",
+				"decisions": "None",
+				"action_items": "- Alice: send notes\n- Bob: update docs",
+				"created_at": "2026-05-06T16:00:00Z"
+			}
+		},
+		{
+			"name": "plain-lines",
+			"meeting": {
+				"id": 2,
+				"title": "Design Review",
+				"date": "2026-05-07T10:30:00Z",
+				"duration_seconds": 2580,
+				"audio_path": "/tmp/rec2.wav",
+				"created_at": "2026-05-07T11:00:00Z"
+			},
+			"transcript": {
+				"id": 2,
+				"meeting_id": 2,
+				"content": "Design discussion about the new onboarding flow.",
+				"created_at": "2026-05-07T11:00:00Z"
+			},
+			"summary": {
+				"id": 2,
+				"meeting_id": 2,
+				"key_points": "Ship v2 by Friday\nCoordinate with QA",
+				"decisions": "Use the red theme",
+				"action_items": "* Carol: mock up the banner",
+				"created_at": "2026-05-07T11:00:00Z"
+			}
+		},
+		{
+			"name": "empty-sections",
+			"meeting": {
+				"id": 3,
+				"title": "Quick Standup",
+				"date": "2026-05-08T09:00:00Z",
+				"duration_seconds": 0,
+				"audio_path": "/tmp/rec3.wav",
+				"created_at": "2026-05-08T09:05:00Z"
+			},
+			"transcript": {
+				"id": 3,
+				"meeting_id": 3,
+				"content": "",
+				"created_at": "2026-05-08T09:05:00Z"
+			},
+			"summary": {
+				"id": 3,
+				"meeting_id": 3,
+				"key_points": "",
+				"decisions": "   ",
+				"action_items": "",
+				"created_at": "2026-05-08T09:05:00Z"
+			}
+		},
+		{
+			"name": "no-summary",
+			"meeting": {
+				"id": 4,
+				"title": "One-on-one: Carol",
+				"date": "2026-05-09T14:00:00Z",
+				"duration_seconds": 65,
+				"audio_path": "/tmp/rec4.wav",
+				"created_at": "2026-05-09T14:02:00Z"
+			},
+			"transcript": {
+				"id": 4,
+				"meeting_id": 4,
+				"content": "Career growth discussion.",
+				"created_at": "2026-05-09T14:02:00Z"
+			},
+			"summary": null
+		},
+		{
+			"name": "no-transcript",
+			"meeting": {
+				"id": 5,
+				"title": "Board Meeting",
+				"date": "2026-05-10T18:00:00Z",
+				"duration_seconds": 3720,
+				"audio_path": "/tmp/rec5.wav",
+				"created_at": "2026-05-10T19:00:00Z"
+			},
+			"transcript": null,
+			"summary": {
+				"id": 5,
+				"meeting_id": 5,
+				"key_points": "Revenue is up 12%\n- Hiring freeze lifted",
+				"decisions": "Approve budget",
+				"action_items": "Dana: draft the shareholder letter",
+				"created_at": "2026-05-10T19:00:00Z"
+			}
+		},
+		{
+			"name": "neither",
+			"meeting": {
+				"id": 6,
+				"title": "Silent Recording",
+				"date": "2026-05-11T08:00:00Z",
+				"duration_seconds": 30,
+				"audio_path": "/tmp/rec6.wav",
+				"created_at": "2026-05-11T08:01:00Z"
+			},
+			"transcript": null,
+			"summary": null
+		},
+		{
+			"name": "unicode",
+			"meeting": {
+				"id": 7,
+				"title": "Café ☕ Q3 Roadmap — 日本語",
+				"date": "2026-05-12T13:45:00Z",
+				"duration_seconds": 1800,
+				"audio_path": "/tmp/rec7.wav",
+				"created_at": "2026-05-12T14:00:00Z"
+			},
+			"transcript": {
+				"id": 7,
+				"meeting_id": 7,
+				"content": "First line.\n\nSecond line after blank.\nThird with 'quotes' and \"double\".",
+				"created_at": "2026-05-12T14:00:00Z"
+			},
+			"summary": {
+				"id": 7,
+				"meeting_id": 7,
+				"key_points": "- 配信リリース: Q3\n* 翻訳チーム募集",
+				"decisions": "Ship in October",
+				"action_items": "",
+				"created_at": "2026-05-12T14:00:00Z"
+			}
+		},
+		{
+			"name": "whitespace-padded",
+			"meeting": {
+				"id": 8,
+				"title": "  Padding Test  ",
+				"date": "2026-05-13T07:00:00Z",
+				"duration_seconds": 125,
+				"audio_path": "/tmp/rec8.wav",
+				"created_at": "2026-05-13T07:02:00Z"
+			},
+			"transcript": {
+				"id": 8,
+				"meeting_id": 8,
+				"content": "  Leading and trailing whitespace  \n\n   ",
+				"created_at": "2026-05-13T07:02:00Z"
+			},
+			"summary": {
+				"id": 8,
+				"meeting_id": 8,
+				"key_points": "\n\n  - Padded bullet  \n\n",
+				"decisions": "Plain decision line",
+				"action_items": "  ",
+				"created_at": "2026-05-13T07:02:00Z"
+			}
+		}
+	]
+}
