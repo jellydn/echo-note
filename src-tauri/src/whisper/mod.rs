@@ -108,7 +108,7 @@ pub type WhisperModelCache = ModelCache<WhisperContext>;
 ///
 /// | whisper-rs | whisper.cpp | Verified models |
 /// |------------|-------------|-----------------|
-/// | 0.13.x     | v1.7.x      | tiny, base, small, medium, large-v3-turbo |
+/// | 0.16.x     | v1.7.x      | tiny, base, small, medium, large-v3-turbo |
 ///
 /// Model files are selected by name and validated by expected size after
 /// download; load/inference compatibility is only proven by the opt-in smoke
@@ -654,31 +654,27 @@ pub fn transcribe_audio_with_options(
             .full(params.clone(), &mono_16k)
             .map_err(|e| anyhow::anyhow!("Transcription failed: {:?}", e))?;
 
-        let num_segments = state
-            .full_n_segments()
-            .map_err(|e| anyhow::anyhow!("Failed to get segment count: {:?}", e))?;
+        let num_segments = state.full_n_segments();
 
         for i in 0..num_segments {
-            let segment_text = state
-                .full_get_segment_text(i)
+            // whisper-rs 0.16: segments are accessed via `get_segment` which
+            // returns a `WhisperSegment` exposing text and timestamp getters.
+            // A `None` (phantom) segment is skipped rather than aborting the
+            // whole transcription — mirrors the old `full_get_segment_text`
+            // behaviour where an out-of-range index yields no text.
+            let Some(segment) = state.get_segment(i) else {
+                continue;
+            };
+            let segment_text = segment
+                .to_str()
                 .map_err(|e| anyhow::anyhow!("Failed to get segment text: {:?}", e))?;
             let segment_text = segment_text.trim();
             if segment_text.is_empty() {
                 continue;
             }
 
-            let start_seconds = window_offset_seconds
-                + state
-                    .full_get_segment_t0(i)
-                    .map_err(|e| anyhow::anyhow!("Failed to get segment start time: {:?}", e))?
-                    as f64
-                    * 0.01;
-            let end_seconds = window_offset_seconds
-                + state
-                    .full_get_segment_t1(i)
-                    .map_err(|e| anyhow::anyhow!("Failed to get segment end time: {:?}", e))?
-                    as f64
-                    * 0.01;
+            let start_seconds = window_offset_seconds + segment.start_timestamp() as f64 * 0.01;
+            let end_seconds = window_offset_seconds + segment.end_timestamp() as f64 * 0.01;
 
             full_text.push_str(segment_text);
             full_text.push(' ');
