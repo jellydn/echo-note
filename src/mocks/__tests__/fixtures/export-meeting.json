@@ -175,6 +175,71 @@
 				"action_items": "  ",
 				"created_at": "2026-05-13T07:02:00Z"
 			}
+		},
+		{
+			"name": "slug-empty-title",
+			"meeting": {
+				"id": 9,
+				"title": "",
+				"date": "2026-05-14T09:00:00Z",
+				"duration_seconds": 300,
+				"audio_path": "/tmp/rec9.wav",
+				"created_at": "2026-05-14T09:05:00Z"
+			},
+			"transcript": null,
+			"summary": null
+		},
+		{
+			"name": "slug-punct-only",
+			"meeting": {
+				"id": 10,
+				"title": "!!! --- ???",
+				"date": "2026-05-15T09:00:00Z",
+				"duration_seconds": 300,
+				"audio_path": "/tmp/rec10.wav",
+				"created_at": "2026-05-15T09:05:00Z"
+			},
+			"transcript": null,
+			"summary": null
+		},
+		{
+			"name": "slug-unicode-digits",
+			"meeting": {
+				"id": 11,
+				"title": "２０２６ Q3 Plan",
+				"date": "2026-05-16T10:00:00Z",
+				"duration_seconds": 600,
+				"audio_path": "/tmp/rec11.wav",
+				"created_at": "2026-05-16T10:10:00Z"
+			},
+			"transcript": null,
+			"summary": null
+		},
+		{
+			"name": "slug-trailing-dashes",
+			"meeting": {
+				"id": 12,
+				"title": "--- Q4 Review ---",
+				"date": "2026-05-17T11:00:00Z",
+				"duration_seconds": 900,
+				"audio_path": "/tmp/rec12.wav",
+				"created_at": "2026-05-17T11:15:00Z"
+			},
+			"transcript": null,
+			"summary": null
+		},
+		{
+			"name": "offset-date",
+			"meeting": {
+				"id": 13,
+				"title": "Cross-Midnight Sync",
+				"date": "2026-05-07T01:30:00+02:00",
+				"duration_seconds": 60,
+				"audio_path": "/tmp/rec13.wav",
+				"created_at": "2026-05-07T01:35:00+02:00"
+			},
+			"transcript": null,
+			"summary": null
 		}
 	]
 }

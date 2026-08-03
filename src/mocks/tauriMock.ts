@@ -1,7 +1,7 @@
 import type { InvokeArgs } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { mockIPC } from "@tauri-apps/api/mocks";
-import { buildMarkdownExport, buildTextExport } from "./exportRenderers";
+import { buildMarkdownExport, buildTextExport, exportFilename } from "./exportRenderers";
 
 /**
  * Browser-only mock of the Tauri IPC surface.
@@ -455,16 +455,6 @@ const buildSummaryFor = (title: string, meetingId: number): Summary => ({
 	created_at: new Date().toISOString(),
 });
 
-// Mirrors the real export command's slug: keep Unicode alphanumerics per char,
-// map everything else to '-', trim edge dashes, and fall back to "meeting".
-const slugify = (title: string): string => {
-	const slug = [...title.toLowerCase()]
-		.map((c) => (/\p{L}|\p{N}/u.test(c) ? c : "-"))
-		.join("")
-		.replace(/^-+|-+$/g, "");
-	return slug || "meeting";
-};
-
 // Simulated async work that reports progress over time.
 const emitProgress = async (
 	eventName: string,
@@ -649,9 +639,6 @@ const handleCommand = async (cmd: string, args?: InvokeArgs): Promise<unknown> =
 				.toLowerCase()
 				.startsWith("markdown");
 			const ext = isMarkdown ? "md" : "txt";
-			// Date in %Y%m%d to mirror the real command's filename
-			// (2026-07-30 -> 20260730).
-			const dateStamp = meeting.date.slice(0, 10).replace(/-/g, "");
 			const transcript = findTranscript(meetingId);
 			const summary = findSummary(meetingId);
 			return ok({
@@ -659,7 +646,7 @@ const handleCommand = async (cmd: string, args?: InvokeArgs): Promise<unknown> =
 				content: isMarkdown
 					? buildMarkdownExport(meeting, transcript, summary)
 					: buildTextExport(meeting, transcript, summary),
-				filename: `${slugify(meeting.title)}-${dateStamp}.${ext}`,
+				filename: exportFilename(meeting.title, meeting.date, ext),
 			});
 		}
 
