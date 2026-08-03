@@ -73,14 +73,21 @@ pub fn cleanup_expired_recordings(
             continue;
         }
 
-        let modified = entry
-            .metadata()
-            .and_then(|m| m.modified())
-            .unwrap_or(SystemTime::UNIX_EPOCH);
+        // Skip files whose metadata can't be read rather than guessing an age:
+        // falling back to UNIX_EPOCH would make an unreadable file look ~56
+        // years old and delete it without inspection.
+        let Ok(metadata) = entry.metadata() else {
+            log::warn!("Skipping {:?}: failed to read metadata", path);
+            continue;
+        };
+        let Ok(modified) = metadata.modified() else {
+            log::warn!("Skipping {:?}: failed to read modified time", path);
+            continue;
+        };
 
         let age = now.duration_since(modified).unwrap_or(Duration::ZERO);
         if age > retention {
-            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            let size = metadata.len();
             match std::fs::remove_file(&path) {
                 Ok(()) => {
                     summary.deleted_count += 1;
