@@ -1,0 +1,80 @@
+{
+  "empty-sections": {
+    "filenameMd": "quick-standup-20260508.md",
+    "filenameTxt": "quick-standup-20260508.txt",
+    "markdown": "# Quick Standup\n\n- **Date:** 2026-05-08 09:00 UTC\n- **Duration:** 0s\n\n## Summary\n\n\n## Transcript\n\n\n",
+    "text": "Quick Standup\nDate: 2026-05-08 09:00 UTC\nDuration: 0s\n\n--- Summary ---\nKey Points:\n\nDecisions:\n   \nAction Items:\n\n\n--- Transcript ---\n\n"
+  },
+  "full": {
+    "filenameMd": "weekly-sync-20260506.md",
+    "filenameTxt": "weekly-sync-20260506.txt",
+    "markdown": "# Weekly Sync\n\n- **Date:** 2026-05-06 15:56 UTC\n- **Duration:** 1h 0m 05s\n\n## Summary\n\n### Key Points\n\n- Discussed Q2 plan\n- Confirmed launch date\n\n### Decisions\n\n- None\n\n### Action Items\n\n- Alice: send notes\n- Bob: update docs\n\n\n## Transcript\n\n[00:00] Speaker 1: Hello world\n[00:05] Speaker 2: Let's start\n",
+    "text": "Weekly Sync\nDate: 2026-05-06 15:56 UTC\nDuration: 1h 0m 05s\n\n--- Summary ---\nKey Points:\n- Discussed Q2 plan\n\n- Confirmed launch date\nDecisions:\nNone\nAction Items:\n- Alice: send notes\n- Bob: update docs\n\n--- Transcript ---\n[00:00] Speaker 1: Hello world\n[00:05] Speaker 2: Let's start\n"
+  },
+  "neither": {
+    "filenameMd": "silent-recording-20260511.md",
+    "filenameTxt": "silent-recording-20260511.txt",
+    "markdown": "# Silent Recording\n\n- **Date:** 2026-05-11 08:00 UTC\n- **Duration:** 30s\n\n",
+    "text": "Silent Recording\nDate: 2026-05-11 08:00 UTC\nDuration: 30s\n"
+  },
+  "no-summary": {
+    "filenameMd": "one-on-one--carol-20260509.md",
+    "filenameTxt": "one-on-one--carol-20260509.txt",
+    "markdown": "# One-on-one: Carol\n\n- **Date:** 2026-05-09 14:00 UTC\n- **Duration:** 1m 05s\n\n## Transcript\n\nCareer growth discussion.\n",
+    "text": "One-on-one: Carol\nDate: 2026-05-09 14:00 UTC\nDuration: 1m 05s\n\n--- Transcript ---\nCareer growth discussion.\n"
+  },
+  "no-transcript": {
+    "filenameMd": "board-meeting-20260510.md",
+    "filenameTxt": "board-meeting-20260510.txt",
+    "markdown": "# Board Meeting\n\n- **Date:** 2026-05-10 18:00 UTC\n- **Duration:** 1h 2m 00s\n\n## Summary\n\n### Key Points\n\n- Revenue is up 12%\n- Hiring freeze lifted\n\n### Decisions\n\n- Approve budget\n\n### Action Items\n\n- Dana: draft the shareholder letter\n\n\n",
+    "text": "Board Meeting\nDate: 2026-05-10 18:00 UTC\nDuration: 1h 2m 00s\n\n--- Summary ---\nKey Points:\nRevenue is up 12%\n- Hiring freeze lifted\nDecisions:\nApprove budget\nAction Items:\nDana: draft the shareholder letter\n"
+  },
+  "offset-date": {
+    "filenameMd": "cross-midnight-sync-20260506.md",
+    "filenameTxt": "cross-midnight-sync-20260506.txt",
+    "markdown": "# Cross-Midnight Sync\n\n- **Date:** 2026-05-06 23:30 UTC\n- **Duration:** 1m 00s\n\n",
+    "text": "Cross-Midnight Sync\nDate: 2026-05-06 23:30 UTC\nDuration: 1m 00s\n"
+  },
+  "plain-lines": {
+    "filenameMd": "design-review-20260507.md",
+    "filenameTxt": "design-review-20260507.txt",
+    "markdown": "# Design Review\n\n- **Date:** 2026-05-07 10:30 UTC\n- **Duration:** 43m 00s\n\n## Summary\n\n### Key Points\n\n- Ship v2 by Friday\n- Coordinate with QA\n\n### Decisions\n\n- Use the red theme\n\n### Action Items\n\n* Carol: mock up the banner\n\n\n## Transcript\n\nDesign discussion about the new onboarding flow.\n",
+    "text": "Design Review\nDate: 2026-05-07 10:30 UTC\nDuration: 43m 00s\n\n--- Summary ---\nKey Points:\nShip v2 by Friday\nCoordinate with QA\nDecisions:\nUse the red theme\nAction Items:\n* Carol: mock up the banner\n\n--- Transcript ---\nDesign discussion about the new onboarding flow.\n"
+  },
+  "slug-empty-title": {
+    "filenameMd": "meeting-20260514.md",
+    "filenameTxt": "meeting-20260514.txt",
+    "markdown": "# \n\n- **Date:** 2026-05-14 09:00 UTC\n- **Duration:** 5m 00s\n\n",
+    "text": "\nDate: 2026-05-14 09:00 UTC\nDuration: 5m 00s\n"
+  },
+  "slug-punct-only": {
+    "filenameMd": "meeting-20260515.md",
+    "filenameTxt": "meeting-20260515.txt",
+    "markdown": "# !!! --- ???\n\n- **Date:** 2026-05-15 09:00 UTC\n- **Duration:** 5m 00s\n\n",
+    "text": "!!! --- ???\nDate: 2026-05-15 09:00 UTC\nDuration: 5m 00s\n"
+  },
+  "slug-trailing-dashes": {
+    "filenameMd": "q4-review-20260517.md",
+    "filenameTxt": "q4-review-20260517.txt",
+    "markdown": "# --- Q4 Review ---\n\n- **Date:** 2026-05-17 11:00 UTC\n- **Duration:** 15m 00s\n\n",
+    "text": "--- Q4 Review ---\nDate: 2026-05-17 11:00 UTC\nDuration: 15m 00s\n"
+  },
+  "slug-unicode-digits": {
+    "filenameMd": "２０２６-q3-plan-20260516.md",
+    "filenameTxt": "２０２６-q3-plan-20260516.txt",
+    "markdown": "# ２０２６ Q3 Plan\n\n- **Date:** 2026-05-16 10:00 UTC\n- **Duration:** 10m 00s\n\n",
+    "text": "２０２６ Q3 Plan\nDate: 2026-05-16 10:00 UTC\nDuration: 10m 00s\n"
+  },
+  "unicode": {
+    "filenameMd": "café---q3-roadmap---日本語-20260512.md",
+    "filenameTxt": "café---q3-roadmap---日本語-20260512.txt",
+    "markdown": "# Café ☕ Q3 Roadmap — 日本語\n\n- **Date:** 2026-05-12 13:45 UTC\n- **Duration:** 30m 00s\n\n## Summary\n\n### Key Points\n\n- 配信リリース: Q3\n* 翻訳チーム募集\n\n### Decisions\n\n- Ship in October\n\n\n## Transcript\n\nFirst line.\n\nSecond line after blank.\nThird with 'quotes' and \"double\".\n",
+    "text": "Café ☕ Q3 Roadmap — 日本語\nDate: 2026-05-12 13:45 UTC\nDuration: 30m 00s\n\n--- Summary ---\nKey Points:\n- 配信リリース: Q3\n* 翻訳チーム募集\nDecisions:\nShip in October\nAction Items:\n\n\n--- Transcript ---\nFirst line.\n\nSecond line after blank.\nThird with 'quotes' and \"double\".\n"
+  },
+  "whitespace-padded": {
+    "filenameMd": "padding-test-20260513.md",
+    "filenameTxt": "padding-test-20260513.txt",
+    "markdown": "#   Padding Test  \n\n- **Date:** 2026-05-13 07:00 UTC\n- **Duration:** 2m 05s\n\n## Summary\n\n### Key Points\n\n- Padded bullet\n\n### Decisions\n\n- Plain decision line\n\n\n## Transcript\n\n  Leading and trailing whitespace  \n\n   \n",
+    "text": "  Padding Test  \nDate: 2026-05-13 07:00 UTC\nDuration: 2m 05s\n\n--- Summary ---\nKey Points:\n\n\n  - Padded bullet  \n\n\nDecisions:\nPlain decision line\nAction Items:\n  \n\n--- Transcript ---\n  Leading and trailing whitespace  \n\n   \n"
+  }
+}
