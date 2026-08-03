@@ -33,6 +33,8 @@ const formatUtcTimestamp = (iso: string): string => {
 
 // Format seconds as "Hh Mm SSs" to mirror the real export command's
 // `format_duration` (e.g. 2580 -> "43m 00s", 3720 -> "1h 2m 00s").
+// Durations are always non-negative (they come from recording lengths), so
+// Math.floor matches Rust's truncating integer division for every real input.
 const formatDuration = (seconds: number): string => {
 	const hours = Math.floor(seconds / 3600);
 	const minutes = Math.floor((seconds % 3600) / 60);
@@ -113,4 +115,4 @@ const buildTextExport = (
 	return text;
 };
 
-export { buildMarkdownExport, buildTextExport, formatDuration, formatUtcTimestamp };
+export { buildMarkdownExport, buildTextExport };
