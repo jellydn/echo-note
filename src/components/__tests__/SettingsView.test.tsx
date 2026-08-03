@@ -300,9 +300,7 @@ describe("SettingsView", () => {
 			await userEvent.click(cleanupButton);
 
 			await waitFor(() => {
-				expect(
-					screen.getByText(/Removed 2 recording/),
-				).toBeInTheDocument();
+				expect(screen.getByText(/Removed 2 recording/)).toBeInTheDocument();
 			});
 		});
 
@@ -346,9 +344,7 @@ describe("SettingsView", () => {
 			await userEvent.click(cleanupButton);
 
 			await waitFor(() => {
-				expect(
-					screen.getByText(/No recordings exceeded the retention policy/),
-				).toBeInTheDocument();
+				expect(screen.getByText(/No recordings exceeded the retention policy/)).toBeInTheDocument();
 			});
 		});
 
@@ -388,9 +384,7 @@ describe("SettingsView", () => {
 			await userEvent.click(cleanupButton);
 
 			await waitFor(() => {
-				expect(
-					screen.getByText("Permission denied"),
-				).toBeInTheDocument();
+				expect(screen.getByText("Permission denied")).toBeInTheDocument();
 			});
 		});
 	});
