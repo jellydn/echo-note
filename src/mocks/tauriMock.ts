@@ -1,6 +1,7 @@
 import type { InvokeArgs } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { mockIPC } from "@tauri-apps/api/mocks";
+import { buildMarkdownExport, buildTextExport } from "./exportRenderers";
 
 /**
  * Browser-only mock of the Tauri IPC surface.
@@ -454,83 +455,6 @@ const buildSummaryFor = (title: string, meetingId: number): Summary => ({
 	created_at: new Date().toISOString(),
 });
 
-// Format a UTC ISO date as "YYYY-MM-DD HH:MM UTC" to mirror the real export
-// renderers' `%Y-%m-%d %H:%M UTC` output.
-const formatUtcTimestamp = (iso: string): string => {
-	const d = new Date(iso);
-	const pad = (n: number): string => String(n).padStart(2, "0");
-	return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
-};
-
-// Format seconds as "Hh Mm SSs" to mirror the real export command's
-// `format_duration` (e.g. 2580 -> "43m 00s", 3720 -> "1h 2m 00s").
-const formatDuration = (seconds: number): string => {
-	const hours = Math.floor(seconds / 3600);
-	const minutes = Math.floor((seconds % 3600) / 60);
-	const secs = seconds % 60;
-	if (hours > 0) return `${hours}h ${minutes}m ${String(secs).padStart(2, "0")}s`;
-	if (minutes > 0) return `${minutes}m ${String(secs).padStart(2, "0")}s`;
-	return `${secs}s`;
-};
-
-// Export a meeting as Markdown.
-const buildMarkdownExport = (meeting: Meeting): string => {
-	const transcript = findTranscript(meeting.id);
-	const summary = findSummary(meeting.id);
-	const sections = [
-		`# ${meeting.title}`,
-		"",
-		`- **Date:** ${formatUtcTimestamp(meeting.date)}`,
-		`- **Duration:** ${formatDuration(meeting.duration_seconds)}`,
-		"",
-		"## Transcript",
-		"",
-		transcript?.content ?? "_No transcript available._",
-	];
-	if (summary) {
-		sections.push(
-			"",
-			"## Key Points",
-			"",
-			summary.key_points,
-			"",
-			"## Decisions",
-			"",
-			summary.decisions,
-			"",
-			"## Action Items",
-			"",
-			summary.action_items,
-		);
-	}
-	return sections.join("\n");
-};
-
-// Export a meeting as plain text, mirroring the real command's
-// `render_meeting_text` (title, date, duration, summary sections, transcript).
-const buildTextExport = (meeting: Meeting): string => {
-	const transcript = findTranscript(meeting.id);
-	const summary = findSummary(meeting.id);
-	const lines = [
-		meeting.title,
-		`Date: ${formatUtcTimestamp(meeting.date)}`,
-		`Duration: ${formatDuration(meeting.duration_seconds)}`,
-	];
-	if (summary) {
-		lines.push(
-			"",
-			"--- Summary ---",
-			`Key Points:\n${summary.key_points}`,
-			`Decisions:\n${summary.decisions}`,
-			`Action Items:\n${summary.action_items}`,
-		);
-	}
-	if (transcript) {
-		lines.push("", "--- Transcript ---", transcript.content);
-	}
-	return lines.join("\n");
-};
-
 // Mirrors the real export command's slug: keep Unicode alphanumerics per char,
 // map everything else to '-', trim edge dashes, and fall back to "meeting".
 const slugify = (title: string): string => {
@@ -728,9 +652,13 @@ const handleCommand = async (cmd: string, args?: InvokeArgs): Promise<unknown> =
 			// Date in %Y%m%d to mirror the real command's filename
 			// (2026-07-30 -> 20260730).
 			const dateStamp = meeting.date.slice(0, 10).replace(/-/g, "");
+			const transcript = findTranscript(meetingId);
+			const summary = findSummary(meetingId);
 			return ok({
 				format: isMarkdown ? "markdown" : "text",
-				content: isMarkdown ? buildMarkdownExport(meeting) : buildTextExport(meeting),
+				content: isMarkdown
+					? buildMarkdownExport(meeting, transcript, summary)
+					: buildTextExport(meeting, transcript, summary),
 				filename: `${slugify(meeting.title)}-${dateStamp}.${ext}`,
 			});
 		}

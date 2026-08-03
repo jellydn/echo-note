@@ -3,7 +3,7 @@ mod cleanup;
 pub mod commands;
 pub mod db;
 mod diarization;
-mod export;
+pub mod export;
 pub mod keychain;
 mod llm;
 mod system_audio;
