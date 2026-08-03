@@ -300,20 +300,14 @@ describe("RecordView", () => {
 			render(<RecordView />);
 
 			await waitFor(() => {
-				expect(
-					screen.getByText("Checking system audio configuration..."),
-				).toBeInTheDocument();
+				expect(screen.getByText("Checking system audio configuration...")).toBeInTheDocument();
 			});
 
 			await waitFor(() => {
-				expect(
-					screen.getByText("System audio not detected"),
-				).toBeInTheDocument();
+				expect(screen.getByText("System audio not detected")).toBeInTheDocument();
 			});
 
-			expect(
-				screen.getByRole("button", { name: /install blackhole/i }),
-			).toBeInTheDocument();
+			expect(screen.getByRole("button", { name: /install blackhole/i })).toBeInTheDocument();
 			expect(screen.getByRole("button", { name: /later/i })).toBeInTheDocument();
 		});
 
@@ -335,9 +329,7 @@ describe("RecordView", () => {
 				expect(screen.getByText("Ready to record")).toBeInTheDocument();
 			});
 
-			expect(
-				screen.queryByText("System audio not detected"),
-			).not.toBeInTheDocument();
+			expect(screen.queryByText("System audio not detected")).not.toBeInTheDocument();
 		});
 
 		it("dismisses banner when Later is clicked", async () => {
@@ -355,17 +347,13 @@ describe("RecordView", () => {
 			render(<RecordView />);
 
 			await waitFor(() => {
-				expect(
-					screen.getByText("System audio not detected"),
-				).toBeInTheDocument();
+				expect(screen.getByText("System audio not detected")).toBeInTheDocument();
 			});
 
 			await userEvent.click(screen.getByRole("button", { name: /later/i }));
 
 			await waitFor(() => {
-				expect(
-					screen.queryByText("System audio not detected"),
-				).not.toBeInTheDocument();
+				expect(screen.queryByText("System audio not detected")).not.toBeInTheDocument();
 			});
 		});
 
@@ -388,18 +376,12 @@ describe("RecordView", () => {
 			render(<RecordView />);
 
 			await waitFor(() => {
-				expect(
-					screen.getByText("System audio not detected"),
-				).toBeInTheDocument();
+				expect(screen.getByText("System audio not detected")).toBeInTheDocument();
 			});
 
-			await userEvent.click(
-				screen.getByRole("button", { name: /install blackhole/i }),
-			);
+			await userEvent.click(screen.getByRole("button", { name: /install blackhole/i }));
 
-			expect(
-				screen.getByText(/Installing BlackHole/),
-			).toBeInTheDocument();
+			expect(screen.getByText(/Installing BlackHole/)).toBeInTheDocument();
 		});
 
 		it("shows done state on successful installation", async () => {
@@ -424,19 +406,13 @@ describe("RecordView", () => {
 			render(<RecordView />);
 
 			await waitFor(() => {
-				expect(
-					screen.getByText("System audio not detected"),
-				).toBeInTheDocument();
+				expect(screen.getByText("System audio not detected")).toBeInTheDocument();
 			});
 
-			await userEvent.click(
-				screen.getByRole("button", { name: /install blackhole/i }),
-			);
+			await userEvent.click(screen.getByRole("button", { name: /install blackhole/i }));
 
 			await waitFor(() => {
-				expect(
-					screen.getByText(/Installation started/),
-				).toBeInTheDocument();
+				expect(screen.getByText(/Installation started/)).toBeInTheDocument();
 			});
 		});
 
@@ -462,14 +438,10 @@ describe("RecordView", () => {
 			render(<RecordView />);
 
 			await waitFor(() => {
-				expect(
-					screen.getByText("System audio not detected"),
-				).toBeInTheDocument();
+				expect(screen.getByText("System audio not detected")).toBeInTheDocument();
 			});
 
-			await userEvent.click(
-				screen.getByRole("button", { name: /install blackhole/i }),
-			);
+			await userEvent.click(screen.getByRole("button", { name: /install blackhole/i }));
 
 			await waitFor(() => {
 				expect(screen.getByText("Homebrew not found")).toBeInTheDocument();

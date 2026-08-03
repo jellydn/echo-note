@@ -397,9 +397,7 @@ describe("MeetingDetailView", () => {
 				expect(screen.getByText("Product Planning Meeting")).toBeInTheDocument();
 			});
 
-			expect(
-				screen.getByRole("button", { name: /export/i }),
-			).toBeInTheDocument();
+			expect(screen.getByRole("button", { name: /export/i })).toBeInTheDocument();
 		});
 
 		it("calls export_meeting_command and copies to clipboard", async () => {
@@ -437,19 +435,13 @@ describe("MeetingDetailView", () => {
 				expect(screen.getByText("Product Planning Meeting")).toBeInTheDocument();
 			});
 
-			await userEvent.click(
-				screen.getByRole("button", { name: /export/i }),
-			);
+			await userEvent.click(screen.getByRole("button", { name: /export/i }));
 
 			await waitFor(() => {
-				expect(
-					screen.getByText(/Exported product-planning-meeting.md/),
-				).toBeInTheDocument();
+				expect(screen.getByText(/Exported product-planning-meeting.md/)).toBeInTheDocument();
 			});
 
-			expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-				"# Meeting Notes\n\nSome content",
-			);
+			expect(navigator.clipboard.writeText).toHaveBeenCalledWith("# Meeting Notes\n\nSome content");
 		});
 
 		it("shows error when export fails", async () => {
@@ -478,14 +470,10 @@ describe("MeetingDetailView", () => {
 				expect(screen.getByText("Product Planning Meeting")).toBeInTheDocument();
 			});
 
-			await userEvent.click(
-				screen.getByRole("button", { name: /export/i }),
-			);
+			await userEvent.click(screen.getByRole("button", { name: /export/i }));
 
 			await waitFor(() => {
-				expect(
-					screen.getByText("Export failed: no transcript"),
-				).toBeInTheDocument();
+				expect(screen.getByText("Export failed: no transcript")).toBeInTheDocument();
 			});
 		});
 
@@ -512,9 +500,7 @@ describe("MeetingDetailView", () => {
 				expect(screen.getByText("Product Planning Meeting")).toBeInTheDocument();
 			});
 
-			await userEvent.click(
-				screen.getByRole("button", { name: /export/i }),
-			);
+			await userEvent.click(screen.getByRole("button", { name: /export/i }));
 
 			// Button should show exporting state
 			expect(screen.getByText("Exporting...")).toBeInTheDocument();

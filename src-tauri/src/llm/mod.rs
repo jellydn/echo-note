@@ -239,7 +239,7 @@ pub async fn generate_summary(
     );
     log::debug!(
         "Ollama response preview: {:.200}",
-        &ollama_response.response
+        ollama_response.response
     );
 
     // Check for empty response

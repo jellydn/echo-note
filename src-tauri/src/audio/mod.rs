@@ -76,13 +76,19 @@ pub struct AudioRecorder {
     state: Arc<Mutex<RecordingState>>,
 }
 
-impl AudioRecorder {
-    pub fn new() -> Self {
+impl Default for AudioRecorder {
+    fn default() -> Self {
         Self {
             mic_handle: None,
             system_handle: None,
             state: Arc::new(Mutex::new(RecordingState::default())),
         }
+    }
+}
+
+impl AudioRecorder {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn is_recording(&self) -> Result<bool> {
