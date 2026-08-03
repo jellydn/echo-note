@@ -1,5 +1,7 @@
 # 🎙️ EchoNote
 
+[![CI](https://github.com/jellydn/echo-note/actions/workflows/ci.yml/badge.svg)](https://github.com/jellydn/echo-note/actions/workflows/ci.yml)
+
 A privacy-first native desktop app that listens to your meetings, transcribes locally, and generates structured summaries — all without data leaving your device.
 
 > No meeting bots. No cloud dependency.
