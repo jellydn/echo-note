@@ -1,5 +1,5 @@
 use crate::db::{get_meeting, get_summary_by_meeting, get_transcript_by_meeting};
-use crate::export::{render_meeting_markdown, render_meeting_text};
+use crate::export::{export_filename, render_meeting_markdown, render_meeting_text};
 use crate::{ApiResponse, AppStateExt};
 use serde::Serialize;
 use tauri::State;
@@ -41,16 +41,7 @@ pub async fn export_meeting_command(
         (render_meeting_text(&meeting, transcript.as_ref(), summary.as_ref()), "txt")
     };
 
-    let slug = meeting
-        .title
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '-' })
-        .collect::<String>()
-        .trim_matches('-')
-        .to_string();
-    let slug = if slug.is_empty() { "meeting".to_string() } else { slug };
-    let filename = format!("{}-{}.{}", slug, meeting.date.format("%Y%m%d"), ext);
+    let filename = export_filename(&meeting, ext);
 
     Ok(ApiResponse::success(ExportResponse {
         format: if is_markdown { "markdown".to_string() } else { "text".to_string() },
