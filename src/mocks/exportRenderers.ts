@@ -115,4 +115,30 @@ const buildTextExport = (
 	return text;
 };
 
-export { buildMarkdownExport, buildTextExport };
+// Mirror of the real export command's slug (export_slug): lowercase, keep
+// Unicode alphanumerics, replace everything else with "-", trim edge dashes,
+// and fall back to "meeting" when empty. Uses \p{L}|\p{N} to closely match
+// Rust's `char::is_alphanumeric()` (Unicode letters + numbers); note that Rust
+// also treats some Other_Alphabetic combining marks as letters, so a title in
+// a script like Devanagari could diverge — a documented limitation, not a bug
+// for realistic meeting titles.
+const exportSlug = (title: string): string => {
+	const slug = [...title.toLowerCase()]
+		.map((c) => (/\p{L}|\p{N}/u.test(c) ? c : "-"))
+		.join("")
+		.replace(/^-+|-+$/g, "");
+	return slug || "meeting";
+};
+
+// Mirror of the real export command's filename: {slug}-{YYYYMMDD}.{ext} with
+// the date stamped in UTC (%Y%m%d). Uses Date UTC getters so an offset
+// timestamp is converted to UTC exactly like chrono's DateTime<Utc> — a naive
+// `date.slice(0, 10)` would drift on non-UTC inputs.
+const exportFilename = (title: string, dateIso: string, ext: string): string => {
+	const d = new Date(dateIso);
+	const pad = (n: number): string => String(n).padStart(2, "0");
+	const dateStamp = `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}`;
+	return `${exportSlug(title)}-${dateStamp}.${ext}`;
+};
+
+export { buildMarkdownExport, buildTextExport, exportFilename, exportSlug };
