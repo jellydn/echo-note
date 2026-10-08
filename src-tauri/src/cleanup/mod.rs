@@ -35,6 +35,20 @@ pub struct StorageUsage {
     pub recordings_dir: String,
 }
 
+/// Derive a recording's age and size from a metadata read, or `None` when the
+/// read fails. Callers must skip files whose metadata can't be read rather
+/// than guessing an age — a failed read is not evidence the file is old, and
+/// the old UNIX_EPOCH fallback deleted unreadable files without inspection.
+fn age_and_size_from_metadata(
+    metadata: std::io::Result<std::fs::Metadata>,
+    now: SystemTime,
+) -> Option<(Duration, u64)> {
+    let metadata = metadata.ok()?;
+    let modified = metadata.modified().ok()?;
+    let age = now.duration_since(modified).unwrap_or(Duration::ZERO);
+    Some((age, metadata.len()))
+}
+
 /// Delete recording files older than `retention_days`. Returns how many files
 /// were removed and how much space was freed. `retention_days == 0` disables
 /// cleanup (returns an empty summary without touching anything).
@@ -73,14 +87,15 @@ pub fn cleanup_expired_recordings(
             continue;
         }
 
-        let modified = entry
-            .metadata()
-            .and_then(|m| m.modified())
-            .unwrap_or(SystemTime::UNIX_EPOCH);
+        // Skip files whose metadata can't be read rather than guessing an age:
+        // falling back to UNIX_EPOCH would make an unreadable file look ~56
+        // years old and delete it without inspection.
+        let Some((age, size)) = age_and_size_from_metadata(entry.metadata(), now) else {
+            log::warn!("Skipping {:?}: failed to read metadata or modified time", path);
+            continue;
+        };
 
-        let age = now.duration_since(modified).unwrap_or(Duration::ZERO);
         if age > retention {
-            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
             match std::fs::remove_file(&path) {
                 Ok(()) => {
                     summary.deleted_count += 1;
@@ -197,6 +212,57 @@ mod tests {
         let dir = temp_dir();
         let summary = cleanup_expired_recordings(&dir, 30).unwrap();
         assert_eq!(summary.deleted_count, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cleanup_skips_entries_whose_metadata_cannot_be_read() {
+        let dir = temp_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // A dangling symlink resolves to no target, so follow-based reads of
+        // it fail (is_file() on Unix; DirEntry::metadata() on Windows, where
+        // it traverses links). Either way it must be skipped, never deleted.
+        // On Unix this entry is intercepted by the is_file() pre-check rather
+        // than the metadata guard, so this test locks the observable contract
+        // end-to-end; the deterministic guard behavior is covered by
+        // metadata_read_failure_skips_instead_of_guessing_epoch_age below.
+        std::os::unix::fs::symlink(dir.join("missing-target.wav"), dir.join("broken.wav"))
+            .unwrap();
+        // A genuinely expired recording is still cleaned up in the same pass.
+        write_file(&dir, "old.wav", 40 * 24);
+
+        let summary = cleanup_expired_recordings(&dir, 30).unwrap();
+
+        assert_eq!(summary.deleted_count, 1);
+        assert!(
+            dir.join("broken.wav").symlink_metadata().is_ok(),
+            "entries whose metadata can't be read must be skipped, not deleted"
+        );
+        assert!(!dir.join("old.wav").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn metadata_read_failure_skips_instead_of_guessing_epoch_age() {
+        // A failed stat must yield None (skip), never a ~56-year-old age that
+        // would delete the file without inspection.
+        let err = std::io::Error::other("simulated stat failure");
+        assert_eq!(age_and_size_from_metadata(Err(err), SystemTime::now()), None);
+    }
+
+    #[test]
+    fn readable_metadata_yields_age_and_size() {
+        // Companion to the failure test above: readable metadata must yield
+        // Some(age, size), proving the helper skips only on genuine failures
+        // and doesn't over-skip valid recordings.
+        let dir = temp_dir();
+        let size = write_file(&dir, "probe.wav", 1);
+        let metadata = std::fs::metadata(dir.join("probe.wav")).unwrap();
+        let age = age_and_size_from_metadata(Ok(metadata), SystemTime::now());
+        assert!(age.is_some(), "readable metadata should yield an age");
+        assert_eq!(age.unwrap().1, size);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

@@ -89,7 +89,7 @@ pub async fn transcribe_audio_command(
     )
     .await
     .map_err(|e| format!("Failed to get diarization_threshold setting: {}", e))?;
-    let diarization_threshold = raw_diarization_threshold
+    let mut diarization_threshold = raw_diarization_threshold
         .parse::<f32>()
         .unwrap_or_else(|_| {
             log::warn!(
@@ -99,6 +99,19 @@ pub async fn transcribe_audio_command(
             );
             DEFAULT_SIMILARITY_THRESHOLD
         });
+    // Clamp to the cosine-similarity range. A value outside [0, 1] (e.g. a
+    // misconfigured "5" or "-1") would silently warp speaker clustering — a
+    // threshold above 1.0 merges every segment, below 0.0 splits them all.
+    // Non-finite values ("NaN", "inf") parse successfully, so route those to
+    // the default too rather than clamping NaN to 0.0.
+    if !diarization_threshold.is_finite() || !(0.0..=1.0).contains(&diarization_threshold) {
+        log::warn!(
+            "diarization_threshold '{}' invalid — using default {}",
+            raw_diarization_threshold,
+            DEFAULT_SIMILARITY_THRESHOLD
+        );
+        diarization_threshold = DEFAULT_SIMILARITY_THRESHOLD;
+    }
 
     let options = TranscriptionOptions {
         diarization_enabled,

@@ -311,7 +311,7 @@ pub async fn cleanup_old_recordings_command(
         .parse::<u64>()
         .unwrap_or_else(|_| {
             log::warn!("Invalid audio_retention_days, using default {}", DEFAULT_AUDIO_RETENTION_DAYS);
-            30
+            DEFAULT_AUDIO_RETENTION_DAYS.parse::<u64>().unwrap_or(30)
         });
 
     let recordings_dir = get_recordings_dir(&app_handle)

@@ -258,8 +258,10 @@ pub async fn download_whisper_model(app_handle: &AppHandle, model_size: &str) ->
     let models_dir = get_models_dir(app_handle)?;
     let model_path = models_dir.join(filename);
 
-    // Check if already downloaded
-    if model_path.exists() {
+    // Check if already downloaded and passes size validation. A corrupt or
+    // truncated file (e.g. from an interrupted download) is removed here by
+    // validate_model_file so it gets re-downloaded instead of being accepted.
+    if is_model_downloaded(app_handle, model_size)? {
         log::info!("Model {} already exists at {:?}", model_size, model_path);
         return Ok(model_path);
     }
@@ -281,13 +283,22 @@ pub async fn download_whisper_model(app_handle: &AppHandle, model_size: &str) ->
         .get(&url)
         .send()
         .await
-        .context("Failed to start download")?;
+        .context("Failed to start download")?
+        .error_for_status()
+        .context("Whisper model download failed")?;
 
     let total_size = response.content_length().unwrap_or(*expected_size);
 
-    // Create the file
-    let mut file = fs::File::create(&model_path)
-        .with_context(|| format!("Failed to create file at {:?}", model_path))?;
+    // Download to a `.partial` file so an interrupted download never leaves a
+    // truncated file at the final path where it would be mistaken for valid.
+    let partial_path = model_path.with_file_name(format!("{filename}.partial"));
+    if partial_path.exists() {
+        fs::remove_file(&partial_path).with_context(|| {
+            format!("Failed to remove stale partial model at {:?}", partial_path)
+        })?;
+    }
+    let mut file = fs::File::create(&partial_path)
+        .with_context(|| format!("Failed to create file at {:?}", partial_path))?;
 
     // Stream the download and report progress
     let mut bytes_downloaded: u64 = 0;
@@ -297,9 +308,17 @@ pub async fn download_whisper_model(app_handle: &AppHandle, model_size: &str) ->
     use futures_util::StreamExt;
 
     while let Some(chunk_result) = stream.next().await {
-        let chunk = chunk_result.context("Failed to download chunk")?;
-        file.write_all(&chunk)
-            .context("Failed to write chunk to file")?;
+        let chunk = match chunk_result {
+            Ok(chunk) => chunk,
+            Err(e) => {
+                let _ = fs::remove_file(&partial_path);
+                return Err(e).context("Failed to download model chunk");
+            }
+        };
+        if let Err(e) = file.write_all(&chunk) {
+            let _ = fs::remove_file(&partial_path);
+            return Err(e).context("Failed to write model chunk");
+        }
 
         bytes_downloaded += chunk.len() as u64;
 
@@ -344,12 +363,44 @@ pub async fn download_whisper_model(app_handle: &AppHandle, model_size: &str) ->
 
     // Validate the downloaded file against the expected size before accepting
     // it. A mismatched file is removed so a later transcription does not fail
-    // at load/inference time with a corrupt model.
-    if !validate_model_file(&model_path, *expected_size)? {
-        return Err(anyhow::anyhow!(
-            "Downloaded model {} failed size validation and was removed",
-            model_size
-        ));
+    // at load/inference time with a corrupt model. Every error path removes
+    // the partial so no stale file lingers for a later download to trip over.
+    if let Err(e) = file.sync_all() {
+        let _ = fs::remove_file(&partial_path);
+        return Err(e).context("Failed to flush model download");
+    }
+    drop(file);
+
+    let actual_size = match fs::metadata(&partial_path) {
+        Ok(m) => m.len(),
+        Err(e) => {
+            let _ = fs::remove_file(&partial_path);
+            return Err(e).with_context(|| {
+                format!(
+                    "Failed to inspect downloaded model at {:?}",
+                    partial_path
+                )
+            });
+        }
+    };
+    if actual_size != *expected_size {
+        let _ = fs::remove_file(&partial_path);
+        anyhow::bail!(
+            "Downloaded model {} has size {}, expected {} — removed",
+            model_size,
+            actual_size,
+            expected_size
+        );
+    }
+
+    if let Err(e) = fs::rename(&partial_path, &model_path) {
+        let _ = fs::remove_file(&partial_path);
+        return Err(e).with_context(|| {
+            format!(
+                "Failed to move model from {:?} to {:?}",
+                partial_path, model_path
+            )
+        });
     }
 
     log::info!(
