@@ -9,7 +9,7 @@
 //! into CI instead of relying on eyeballing the two implementations.
 
 use echo_note_lib::db::{Meeting, Summary, Transcript};
-use echo_note_lib::export::{render_meeting_markdown, render_meeting_text};
+use echo_note_lib::export::{export_filename, render_meeting_markdown, render_meeting_text};
 use serde::Deserialize;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -89,5 +89,7 @@ fn mock_export_matches_rust_renderers_byte_for_byte() {
         let rust_text = render_meeting_text(&case.meeting, case.transcript.as_ref(), case.summary.as_ref());
         assert_case_matches(&mock, case, rust_md, "markdown");
         assert_case_matches(&mock, case, rust_text, "text");
+        assert_case_matches(&mock, case, export_filename(&case.meeting, "md"), "filenameMd");
+        assert_case_matches(&mock, case, export_filename(&case.meeting, "txt"), "filenameTxt");
     }
 }
