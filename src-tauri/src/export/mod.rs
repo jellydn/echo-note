@@ -76,6 +76,34 @@ pub fn render_meeting_text(
     text
 }
 
+/// Slugify a meeting title for use in an export filename: lowercase, keep
+/// Unicode alphanumerics, replace everything else with '-', trim edge dashes,
+/// and fall back to "meeting" when empty.
+pub fn export_slug(title: &str) -> String {
+    let slug = title
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect::<String>();
+    let trimmed = slug.trim_matches('-');
+    if trimmed.is_empty() {
+        "meeting".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Build the export filename `{slug}-{YYYYMMDD}.{ext}` with the date stamped
+/// in UTC (`%Y%m%d`), mirroring the real export command's filename generation.
+pub fn export_filename(meeting: &Meeting, ext: &str) -> String {
+    format!(
+        "{}-{}.{}",
+        export_slug(&meeting.title),
+        meeting.date.format("%Y%m%d"),
+        ext
+    )
+}
+
 /// Push a bulleted Markdown section, skipping empty content.
 fn push_section(md: &mut String, title: &str, content: &str) {
     let trimmed = content.trim();
@@ -194,5 +222,33 @@ mod tests {
         assert_eq!(format_duration(65), "1m 05s");
         assert_eq!(format_duration(3605), "1h 0m 05s");
         assert_eq!(format_duration(30), "30s");
+    }
+
+    #[test]
+    fn slug_handles_lowercase_and_separators() {
+        assert_eq!(export_slug("Weekly Sync"), "weekly-sync");
+        // Adjacent separators collapse to multiple dashes; only edges are trimmed.
+        assert_eq!(export_slug("One-on-one: Carol"), "one-on-one--carol");
+        assert_eq!(export_slug("  Padding Test  "), "padding-test");
+    }
+
+    #[test]
+    fn slug_keeps_unicode_alphanumerics_and_replaces_symbols() {
+        // 'é' and CJK are alphanumeric; emoji and em-dash are not (so ☕ and —
+        // each become '-', and the surrounding spaces add more).
+        assert_eq!(export_slug("Café ☕ Q3 Roadmap — 日本語"), "café---q3-roadmap---日本語");
+    }
+
+    #[test]
+    fn slug_falls_back_to_meeting_when_empty() {
+        assert_eq!(export_slug(""), "meeting");
+        assert_eq!(export_slug("!!!---???"), "meeting");
+    }
+
+    #[test]
+    fn filename_stamps_utc_date_with_ext() {
+        let m = meeting();
+        assert_eq!(export_filename(&m, "md"), "weekly-sync-20260506.md");
+        assert_eq!(export_filename(&m, "txt"), "weekly-sync-20260506.txt");
     }
 }
