@@ -2,7 +2,24 @@
 	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
 	"extends": ["config:recommended"],
 	"dependencyDashboard": true,
+	"lockFileMaintenance": {
+		"enabled": true,
+		"schedule": ["before 4am on monday"],
+		"automerge": true
+	},
 	"packageRules": [
+		{
+			"matchManagers": ["npm", "bun"],
+			"matchUpdateTypes": ["minor", "patch"],
+			"groupName": "Bun/npm minor and patch updates",
+			"groupSlug": "bun-npm-minor-patch"
+		},
+		{
+			"matchManagers": ["cargo"],
+			"matchUpdateTypes": ["minor", "patch"],
+			"groupName": "Cargo minor and patch updates",
+			"groupSlug": "cargo-minor-patch"
+		},
 		{
 			"matchDepNames": ["ndarray", "ort", "whisper-rs", "cpal"],
 			"description": "Known-breaking Rust crate majors, migrated in PR #80. Surface as Dependency Dashboard items (approve there to open a PR) instead of cluttering the open-PR list.",
