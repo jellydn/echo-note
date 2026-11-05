@@ -34,7 +34,7 @@ futures-util = "0.3"
 whisper-rs = "0.16"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
-ort = "=2.0.0-rc.13"
+ort = "=2.0.0-rc.15"
 ndarray = "0.17"
 rustfft = "6"
 keyring = "4"

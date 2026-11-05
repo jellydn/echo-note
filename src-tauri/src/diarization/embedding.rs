@@ -50,9 +50,12 @@ pub struct OnnxSpeakerEmbedder {
 
 impl OnnxSpeakerEmbedder {
     pub fn from_model_path(path: &Path) -> Result<Self> {
-        // ort 2.0.0-rc.13's builder methods return `Error<SessionBuilder>` which
+        let environment = ort::init()
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to create ONNX environment: {:?}", e))?;
+        // ort's builder methods return `Error<SessionBuilder>` which
         // is not Send/Sync, so `?` cannot convert into anyhow — map explicitly.
-        let mut builder = Session::builder()
+        let mut builder = Session::builder(&environment)
             .map_err(|e| anyhow::anyhow!("Failed to create session builder: {:?}", e))?
             .with_optimization_level(GraphOptimizationLevel::Level1)
             .map_err(|e| anyhow::anyhow!("Failed to set optimization level: {:?}", e))?
