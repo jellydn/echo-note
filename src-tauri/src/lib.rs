@@ -72,10 +72,20 @@ pub fn run() {
                     .await
                     .map_err(|e| format!("Failed to initialize default settings: {}", e))?;
 
+                let secret_store = Arc::new(KeychainStore);
+                if keychain::migrate_legacy_secrets(&db_pool, secret_store.as_ref())
+                    .await
+                    .is_err()
+                {
+                    // Do not block local recording when Keychain is unavailable,
+                    // or expose credential-store errors that might include secrets.
+                    log::warn!("Legacy credential migration incomplete; will retry next startup");
+                }
+
                 app_handle.manage(AppStateExt {
                     db: db_pool,
                     audio_recorder: Mutex::new(AudioRecorder::new()),
-                    secret_store: Arc::new(KeychainStore),
+                    secret_store,
                     whisper_model_cache: Arc::new(Mutex::new(WhisperModelCache::default())),
                 });
                 Ok::<(), String>(())

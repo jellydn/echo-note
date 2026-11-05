@@ -81,6 +81,9 @@ pub async fn set_setting_command(
             .secret_store
             .set(API_KEY_ACCOUNT, &request.value)
             .map_err(|e| format!("Failed to store secret: {}", e))?;
+        delete_setting(&state.db, &request.key)
+            .await
+            .map_err(|e| format!("Failed to remove legacy secret setting: {}", e))?;
         return Ok(ApiResponse::success(true));
     }
 
@@ -125,7 +128,12 @@ pub async fn delete_setting_command(
             .secret_store
             .delete(API_KEY_ACCOUNT)
             .map_err(|e| format!("Failed to delete secret: {}", e))?;
-        return if deleted {
+        // A failed startup migration may have left only the legacy row.
+        // Remove it too, or the next startup could restore a deleted key.
+        let legacy_deleted = delete_setting(&state.db, &key)
+            .await
+            .map_err(|e| format!("Failed to remove legacy secret setting: {}", e))?;
+        return if deleted || legacy_deleted {
             Ok(ApiResponse::success(true))
         } else {
             Ok(ApiResponse::error(format!(

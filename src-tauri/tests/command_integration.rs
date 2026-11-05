@@ -78,12 +78,7 @@ async fn settings_command_round_trip() {
         .await
         .expect("list_settings_command should succeed");
     assert!(list.success);
-    let keys: Vec<&str> = list
-        .data
-        .iter()
-        .flatten()
-        .map(|s| s.key.as_str())
-        .collect();
+    let keys: Vec<&str> = list.data.iter().flatten().map(|s| s.key.as_str()).collect();
     assert!(
         keys.contains(&"whisper_model_size"),
         "listed settings should include the one we set"
@@ -201,7 +196,11 @@ async fn meeting_command_lifecycle_with_search() {
     let hits = search_meetings_command(state(&app), "budget".to_string())
         .await
         .expect("search_meetings_command should succeed");
-    assert_eq!(hits.data.unwrap().len(), 1, "search should find the meeting");
+    assert_eq!(
+        hits.data.unwrap().len(),
+        1,
+        "search should find the meeting"
+    );
 
     let updated = update_meeting_command(state(&app), id, "Q2 Planning (renamed)".to_string())
         .await
@@ -273,11 +272,7 @@ async fn transcript_and_summary_commands_link_to_meeting() {
         .await
         .expect("get_summary_by_meeting_command should succeed");
     assert_eq!(
-        summary_by_meeting
-            .data
-            .unwrap()
-            .unwrap()
-            .key_points,
+        summary_by_meeting.data.unwrap().unwrap().key_points,
         "- reviewed roadmap"
     );
 }
@@ -292,4 +287,152 @@ async fn missing_records_return_error_responses() {
         .expect("delete_setting_command should succeed");
     assert!(!missing.success, "deleting a missing setting should error");
     assert!(missing.error.is_some());
+}
+
+#[tokio::test]
+async fn legacy_secret_migration_preserves_credentials_and_other_settings() {
+    use echo_note_lib::db::{get_setting, set_setting};
+    use echo_note_lib::keychain::{migrate_legacy_secrets, SecretStore};
+
+    for existing in [None, Some("newer-key"), Some("")] {
+        let pool = setup_test_db().await;
+        let store = InMemorySecretStore::new();
+        set_setting(&pool, API_KEY_ACCOUNT, "legacy-key")
+            .await
+            .unwrap();
+        set_setting(&pool, "audio_device", "microphone")
+            .await
+            .unwrap();
+        if let Some(value) = existing {
+            store.set(API_KEY_ACCOUNT, value).unwrap();
+        }
+
+        migrate_legacy_secrets(&pool, &store).await.unwrap();
+        assert_eq!(
+            store.get(API_KEY_ACCOUNT).unwrap().as_deref(),
+            Some(existing.unwrap_or("legacy-key"))
+        );
+        assert_eq!(
+            get_setting(&pool, API_KEY_ACCOUNT, "absent").await.unwrap(),
+            "absent"
+        );
+        assert_eq!(
+            get_setting(&pool, "audio_device", "").await.unwrap(),
+            "microphone"
+        );
+        migrate_legacy_secrets(&pool, &store).await.unwrap();
+        assert_eq!(
+            store.get(API_KEY_ACCOUNT).unwrap().as_deref(),
+            Some(existing.unwrap_or("legacy-key"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn secret_edits_remove_legacy_rows_so_migration_cannot_restore_deleted_keys() {
+    use echo_note_lib::db::{get_setting, set_setting};
+    use echo_note_lib::keychain::migrate_legacy_secrets;
+
+    for secure_key_exists in [false, true] {
+        let app = build_app().await;
+        let state = state(&app);
+        set_setting(&state.db, API_KEY_ACCOUNT, "legacy-key")
+            .await
+            .unwrap();
+        if secure_key_exists {
+            set_setting_command(
+                app.state(),
+                SetSettingRequest {
+                    key: API_KEY_ACCOUNT.into(),
+                    value: "replacement-key".into(),
+                },
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                get_setting(&state.db, API_KEY_ACCOUNT, "absent")
+                    .await
+                    .unwrap(),
+                "absent"
+            );
+            // Model a retained legacy row after an earlier failed startup migration.
+            set_setting(&state.db, API_KEY_ACCOUNT, "legacy-key")
+                .await
+                .unwrap();
+        }
+        let deleted = delete_setting_command(app.state(), API_KEY_ACCOUNT.into())
+            .await
+            .unwrap();
+        assert!(deleted.success);
+        assert_eq!(
+            get_setting(&state.db, API_KEY_ACCOUNT, "absent")
+                .await
+                .unwrap(),
+            "absent"
+        );
+        migrate_legacy_secrets(&state.db, state.secret_store.as_ref())
+            .await
+            .unwrap();
+        assert!(state.secret_store.get(API_KEY_ACCOUNT).unwrap().is_none());
+    }
+}
+
+#[tokio::test]
+async fn legacy_secret_migration_retains_plaintext_until_secure_storage_succeeds() {
+    use echo_note_lib::db::{get_setting, set_setting};
+    use echo_note_lib::keychain::{migrate_legacy_secrets, SecretStore};
+
+    struct UnavailableStore {
+        read_fails: bool,
+        write_fails: bool,
+    }
+    impl SecretStore for UnavailableStore {
+        fn get(&self, _: &str) -> anyhow::Result<Option<String>> {
+            if self.read_fails {
+                anyhow::bail!("credential store locked");
+            }
+            Ok(None)
+        }
+        fn set(&self, _: &str, _: &str) -> anyhow::Result<()> {
+            if self.write_fails {
+                anyhow::bail!("credential write rejected");
+            }
+            Ok(()) // A store that acknowledges a write but does not persist it.
+        }
+        fn delete(&self, _: &str) -> anyhow::Result<bool> {
+            Ok(false)
+        }
+    }
+
+    for (read_fails, write_fails) in [(true, false), (false, true), (false, false)] {
+        let pool = setup_test_db().await;
+        set_setting(&pool, API_KEY_ACCOUNT, "legacy-key")
+            .await
+            .unwrap();
+        let result = migrate_legacy_secrets(
+            &pool,
+            &UnavailableStore {
+                read_fails,
+                write_fails,
+            },
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(!result.unwrap_err().to_string().contains("legacy-key"));
+        assert_eq!(
+            get_setting(&pool, API_KEY_ACCOUNT, "absent").await.unwrap(),
+            "legacy-key"
+        );
+
+        let working_store = InMemorySecretStore::new();
+        migrate_legacy_secrets(&pool, &working_store).await.unwrap();
+        assert_eq!(
+            working_store.get(API_KEY_ACCOUNT).unwrap().as_deref(),
+            Some("legacy-key")
+        );
+        assert_eq!(
+            get_setting(&pool, API_KEY_ACCOUNT, "absent").await.unwrap(),
+            "absent"
+        );
+    }
 }

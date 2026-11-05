@@ -123,6 +123,32 @@ pub fn is_secret_setting(key: &str) -> bool {
     SECRET_SETTING_KEYS.contains(&key)
 }
 
+/// Move legacy plaintext settings to the credential store during startup.
+/// Existing secure values take precedence. Failed reads, writes or verification
+/// leave the SQLite row intact so the next startup can retry without key loss.
+pub async fn migrate_legacy_secrets(
+    pool: &sqlx::Pool<sqlx::Sqlite>,
+    store: &dyn SecretStore,
+) -> Result<()> {
+    for setting in crate::db::list_settings(pool).await? {
+        if !is_secret_setting(&setting.key) {
+            continue;
+        }
+        let key = setting.key.as_str();
+        let value = setting.value;
+
+        if store.get(key)?.is_none() {
+            store.set(key, &value)?;
+            anyhow::ensure!(
+                store.get(key)?.as_deref() == Some(value.as_str()),
+                "Credential migration could not verify secure storage"
+            );
+        }
+        crate::db::delete_setting(pool, key).await?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,7 +160,10 @@ mod tests {
         assert!(store.get("api_key").unwrap().is_none());
 
         store.set("api_key", "sk-test-123").unwrap();
-        assert_eq!(store.get("api_key").unwrap().as_deref(), Some("sk-test-123"));
+        assert_eq!(
+            store.get("api_key").unwrap().as_deref(),
+            Some("sk-test-123")
+        );
 
         assert!(store.delete("api_key").unwrap());
         assert!(store.get("api_key").unwrap().is_none());
