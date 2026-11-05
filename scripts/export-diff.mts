@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
 import process from "node:process";
-import { buildMarkdownExport, buildTextExport } from "../src/mocks/exportRenderers";
+import { buildMarkdownExport, buildTextExport, exportFilename } from "../src/mocks/exportRenderers";
 
 // Differential-fixture renderer used by src-tauri/tests/export_fidelity.rs.
 // Reads a shared JSON fixture and prints the mock builders' output for every
-// case in both formats, so the Rust test can compare byte-for-byte against the
-// real renderers. Run: bun scripts/export-diff.mts <fixture.json>
+// case in both formats (plus the export filenames), so the Rust test can
+// compare byte-for-byte against the real renderers. Run: bun scripts/export-diff.mts <fixture.json>
 
 interface FixtureCase {
 	name: string;
@@ -22,11 +22,16 @@ if (!fixturePath) {
 
 const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as { cases: FixtureCase[] };
 
-const out: Record<string, { markdown: string; text: string }> = {};
+const out: Record<
+	string,
+	{ markdown: string; text: string; filenameMd: string; filenameTxt: string }
+> = {};
 for (const c of fixture.cases) {
 	out[c.name] = {
 		markdown: buildMarkdownExport(c.meeting, c.transcript ?? undefined, c.summary ?? undefined),
 		text: buildTextExport(c.meeting, c.transcript ?? undefined, c.summary ?? undefined),
+		filenameMd: exportFilename(c.meeting.title, c.meeting.date, "md"),
+		filenameTxt: exportFilename(c.meeting.title, c.meeting.date, "txt"),
 	};
 }
 process.stdout.write(JSON.stringify(out));

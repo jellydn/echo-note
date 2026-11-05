@@ -26,16 +26,16 @@ sqlx = { version = "0.9", features = ["runtime-tokio", "sqlite", "chrono", "migr
 tokio = { version = "1", features = ["full"] }
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
-cpal = "0.15"
+cpal = "0.18"
 hound = "3.5"
 log = "0.4"
 reqwest = { version = "0.13", features = ["stream", "json"] }
 futures-util = "0.3"
-whisper-rs = "0.13"
+whisper-rs = "0.16"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
-ort = "=2.0.0-rc.10"
-ndarray = "0.16"
+ort = "=2.0.0-rc.13"
+ndarray = "0.17"
 rustfft = "6"
 keyring = "4"
 
