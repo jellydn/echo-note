@@ -3,7 +3,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample};
 use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -18,6 +18,21 @@ pub const MAX_RECORDING_DURATION_SECS: u64 = 2 * 60 * 60;
 /// Convert a max duration and sample rate into a sample-count cap.
 fn max_samples_for(sample_rate: u32) -> usize {
     (MAX_RECORDING_DURATION_SECS * u64::from(sample_rate)) as usize
+}
+
+/// Build a recording file path that won't clobber an existing file.
+///
+/// Two recordings stopped within the same second would share the same
+/// `recording_YYYYMMDD_HHMMSS.wav` name, and the second write would silently
+/// overwrite the first. Append `_1`, `_2`, ... until a free name is found.
+fn next_recording_path(output_dir: &Path, timestamp: &str) -> PathBuf {
+    let mut candidate = output_dir.join(format!("recording_{timestamp}.wav"));
+    let mut n = 1u32;
+    while candidate.exists() {
+        candidate = output_dir.join(format!("recording_{timestamp}_{n}.wav"));
+        n += 1;
+    }
+    candidate
 }
 
 /// Recording control messages
@@ -298,10 +313,11 @@ impl AudioRecorder {
         let output_sample_rate = mic_data.as_ref().map(|s| s.sample_rate).unwrap_or(16000);
         let used_system_audio = system_data.is_some();
 
-        // Generate filename with timestamp
+        // Generate filename with timestamp, deduplicating when two recordings
+        // stop within the same second so the second write never clobbers the
+        // first.
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
-        let filename = format!("recording_{}.wav", timestamp);
-        let file_path = output_dir.join(&filename);
+        let file_path = next_recording_path(&output_dir, &timestamp);
 
         // Create output directory if needed
         std::fs::create_dir_all(&output_dir)?;
@@ -416,7 +432,8 @@ fn run_single_recording_thread(
         .default_input_config()
         .context("Failed to get default input config")?;
 
-    let sample_rate = config.sample_rate().0;
+    // cpal 0.18: `SampleRate` is a type alias for `u32` (no `.0` accessor).
+    let sample_rate = config.sample_rate();
     let channels = config.channels();
     let sample_format = config.sample_format();
 
@@ -517,8 +534,9 @@ where
 
     let err_fn = |err| log::error!("Audio stream error: {}", err);
 
+    // cpal 0.18: `build_input_stream` takes `StreamConfig` by value.
     let stream = device.build_input_stream(
-        config,
+        *config,
         move |data: &[T], _: &_| {
             if should_stop.load(Ordering::SeqCst) {
                 return;
@@ -593,8 +611,9 @@ where
 {
     let channels = config.channels as usize;
 
+    // cpal 0.18: `build_input_stream` takes `StreamConfig` by value.
     let stream = device.build_input_stream(
-        config,
+        *config,
         move |data: &[T], _: &_| {
             for frame in data.chunks(channels) {
                 update_peak(&peak, peak_sample_from_frame(frame));
@@ -624,7 +643,9 @@ pub fn list_audio_devices() -> Result<Vec<(String, String)>> {
 
     let mut name_counts = HashMap::new();
     for device in devices {
-        if let Ok(name) = device.name() {
+        // cpal 0.18: `Device::name()` was replaced by `description()`.
+        if let Ok(description) = device.description() {
+            let name = description.name().to_string();
             let id = make_audio_device_id(&name, next_device_occurrence(&mut name_counts, &name));
             device_list.push((id, name));
         }
@@ -682,14 +703,17 @@ pub fn collect_device_diagnostics(host: &cpal::Host) -> Result<Vec<DeviceDiagnos
     let mut diagnostics = Vec::new();
 
     for device in host.input_devices().context("Failed to access input devices")? {
-        let name = device.name().unwrap_or_else(|_| "Unknown device".to_string());
+        let name = device
+            .description()
+            .map(|d| d.name().to_string())
+            .unwrap_or_else(|_| "Unknown device".to_string());
         let id = make_audio_device_id(&name, next_device_occurrence(&mut name_counts, &name));
 
         let (sample_format, channels, sample_rate) = match device.default_input_config() {
             Ok(config) => (
                 Some(sample_format_label(config.sample_format()).to_string()),
                 Some(config.channels()),
-                Some(config.sample_rate().0),
+                Some(config.sample_rate()),
             ),
             Err(_) => (None, None, None),
         };
@@ -711,7 +735,7 @@ pub fn get_audio_diagnostics() -> Result<AudioDiagnostics> {
     let host = cpal::default_host();
     let default_device = host
         .default_input_device()
-        .and_then(|device| device.name().ok());
+        .and_then(|device| device.description().map(|d| d.name().to_string()).ok());
 
     let devices = collect_device_diagnostics(&host)?;
     let blackhole_installed = crate::system_audio::is_blackhole_installed();
@@ -752,7 +776,8 @@ fn collect_named_input_devices(host: &cpal::Host) -> Result<Vec<(String, String,
     let mut name_counts = HashMap::new();
 
     for device in host.input_devices().context("Failed to get devices")? {
-        if let Ok(name) = device.name() {
+        if let Ok(description) = device.description() {
+            let name = description.name().to_string();
             let occurrence = next_device_occurrence(&mut name_counts, &name);
             let id = make_audio_device_id(&name, occurrence);
             devices_with_names.push((id, name, device));
@@ -882,6 +907,29 @@ pub fn get_recordings_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn next_recording_path_deduplicates_same_second_stops() {
+        let dir = std::env::temp_dir().join(format!(
+            "echo-note-audio-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let timestamp = "20260730_120000";
+        let first = next_recording_path(&dir, timestamp);
+        assert_eq!(first, dir.join("recording_20260730_120000.wav"));
+        std::fs::write(&first, b"first").unwrap();
+
+        let second = next_recording_path(&dir, timestamp);
+        assert_eq!(second, dir.join("recording_20260730_120000_1.wav"));
+        std::fs::write(&second, b"second").unwrap();
+
+        let third = next_recording_path(&dir, timestamp);
+        assert_eq!(third, dir.join("recording_20260730_120000_2.wav"));
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn max_samples_for_scales_with_sample_rate() {

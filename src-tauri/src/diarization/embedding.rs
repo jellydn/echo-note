@@ -13,7 +13,7 @@
 //! their first-order deltas, summarised across the segment with mean and
 //! standard deviation.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use ndarray::Array3;
 use ort::{
     inputs,
@@ -50,21 +50,27 @@ pub struct OnnxSpeakerEmbedder {
 
 impl OnnxSpeakerEmbedder {
     pub fn from_model_path(path: &Path) -> Result<Self> {
-        let session = Session::builder()?
-            .with_optimization_level(GraphOptimizationLevel::Level1)?
-            .with_intra_threads(2)?
+        // ort 2.0.0-rc.13's builder methods return `Error<SessionBuilder>` which
+        // is not Send/Sync, so `?` cannot convert into anyhow — map explicitly.
+        let mut builder = Session::builder()
+            .map_err(|e| anyhow::anyhow!("Failed to create session builder: {:?}", e))?
+            .with_optimization_level(GraphOptimizationLevel::Level1)
+            .map_err(|e| anyhow::anyhow!("Failed to set optimization level: {:?}", e))?
+            .with_intra_threads(2)
+            .map_err(|e| anyhow::anyhow!("Failed to set intra threads: {:?}", e))?;
+        let session = builder
             .commit_from_file(path)
-            .with_context(|| format!("Failed to load diarization model at {}", path.display()))?;
+            .map_err(|e| anyhow::anyhow!("Failed to load diarization model at {}: {:?}", path.display(), e))?;
 
         let input_name = session
-            .inputs
+            .inputs()
             .first()
-            .map(|input| input.name.clone())
+            .map(|input| input.name().to_string())
             .unwrap_or_else(|| "mel_spectrogram".to_string());
         let output_name = session
-            .outputs
+            .outputs()
             .first()
-            .map(|output| output.name.clone())
+            .map(|output| output.name().to_string())
             .unwrap_or_else(|| "speaker_embedding".to_string());
 
         Ok(Self {
@@ -78,13 +84,18 @@ impl OnnxSpeakerEmbedder {
 impl Embedder for OnnxSpeakerEmbedder {
     fn embed(&self, audio: &[f32]) -> Result<Vec<f32>> {
         let features = log_mel_spectrogram(audio);
-        let tensor = TensorRef::from_array_view(&features)?;
+        let tensor = TensorRef::from_array_view(&features)
+            .map_err(|e| anyhow::anyhow!("Failed to create input tensor: {:?}", e))?;
         let mut session = self
             .session
             .lock()
             .map_err(|_| anyhow::anyhow!("Diarization model session lock poisoned"))?;
-        let outputs = session.run(inputs![self.input_name.as_str() => tensor])?;
-        let (_, data) = outputs[self.output_name.as_str()].try_extract_tensor::<f32>()?;
+        let outputs = session
+            .run(inputs![self.input_name.as_str() => tensor])
+            .map_err(|e| anyhow::anyhow!("Failed to run diarization model: {:?}", e))?;
+        let (_, data) = outputs[self.output_name.as_str()]
+            .try_extract_tensor::<f32>()
+            .map_err(|e| anyhow::anyhow!("Failed to extract embedding tensor: {:?}", e))?;
         let mut embedding = data.to_vec();
         l2_normalize(&mut embedding);
         Ok(embedding)
