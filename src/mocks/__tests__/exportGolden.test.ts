@@ -7,14 +7,14 @@ import fixture from "./fixtures/export-meeting.json";
 //
 // The committed golden outputs (fixtures/export-golden.json) are generated
 // from the *real* Rust renderers by `src-tauri/tests/export_goldens.rs`
-// (`cargo test --test export_goldens -- --ignored regenerate_goldens`), and a
+// (`cargo test --manifest-path src-tauri/Cargo.toml --test export_goldens -- --ignored regenerate_goldens`), and a
 // CI guard there fails if they drift from the Rust side. Asserting the mock
 // builders reproduce those goldens byte-for-byte here catches mock drift in
 // the frontend job — the same guarantee the Rust differential test provides,
 // but without needing the Rust toolchain.
 //
 // Regenerate goldens after a renderer change:
-//   cargo test --test export_goldens -- --ignored regenerate_goldens
+//   cargo test --manifest-path src-tauri/Cargo.toml --test export_goldens -- --ignored regenerate_goldens
 
 type GoldenCase = (typeof goldens)[keyof typeof goldens];
 
@@ -23,7 +23,7 @@ describe("export mock golden fidelity", () => {
 		it(`case '${c.name}' matches the committed golden output`, () => {
 			if (!(c.name in goldens)) {
 				throw new Error(
-					`No committed golden output for case '${c.name}' — regenerate goldens with: cargo test --test export_goldens -- --ignored regenerate_goldens`,
+					`No committed golden output for case '${c.name}' — regenerate goldens with: cargo test --manifest-path src-tauri/Cargo.toml --test export_goldens -- --ignored regenerate_goldens`,
 				);
 			}
 			const transcript = c.transcript ?? undefined;
