@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Rustup installs Cargo under ~/.cargo. Keep it available after an orb resumes.
+if [ -f "$HOME/.cargo/env" ]; then
+  # shellcheck disable=SC1091
+  source "$HOME/.cargo/env"
+fi
+
+command -v bun >/dev/null
+command -v cargo >/dev/null
