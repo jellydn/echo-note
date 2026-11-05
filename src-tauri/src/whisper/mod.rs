@@ -117,7 +117,7 @@ pub type WhisperModelCache = ModelCache<WhisperContext>;
 /// test (`ECHO_NOTE_WHISPER_SMOKE_TEST=1`). Renovate updates to `whisper-rs`
 /// must run that smoke test before merge.
 pub const WHISPER_MODELS: &[(&str, &str, u64, &str)] = &[
-    ("tiny", "ggml-tiny.bin", 78_000_000, "Tiny"),
+    ("tiny", "ggml-tiny.bin", 77_691_713, "Tiny"),
     ("tiny-q5_1", "ggml-tiny-q5_1.bin", 33_000_000, "Tiny (Q5)"),
     ("base", "ggml-base.bin", 149_000_000, "Base"),
     ("base-q5_1", "ggml-base-q5_1.bin", 60_000_000, "Base (Q5)"),
@@ -268,9 +268,14 @@ pub async fn download_whisper_model(app_handle: &AppHandle, model_size: &str) ->
         return Ok(model_path);
     }
 
-    // Download URL from Hugging Face
+    // Keep Tiny's download paired with its verified exact byte size.
+    let revision = if model_size == "tiny" {
+        "5359861c739e955e79d9a303bcbc70fb988958b1"
+    } else {
+        "main"
+    };
     let url = format!(
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{}",
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/{revision}/{}",
         filename
     );
 
@@ -948,10 +953,14 @@ mod tests {
             std::env::temp_dir().join(format!("echo-note-whisper-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("ggml-tiny.bin");
-        std::fs::write(&path, vec![0u8; 78_000_000]).unwrap();
-
-        assert!(validate_model_file(&path, 78_000_000).unwrap());
-        assert!(path.exists(), "matching file must be kept");
+        let expected_size = WHISPER_MODELS.iter().find(|m| m.0 == "tiny").unwrap().2;
+        // Official ggml-tiny.bin at 5359861c739e955e79d9a303bcbc70fb988958b1.
+        for size in [77_691_713, 77_691_712, 77_691_714] {
+            std::fs::File::create(&path).unwrap().set_len(size).unwrap();
+            let valid = validate_model_file(&path, expected_size).unwrap();
+            assert_eq!(valid, size == 77_691_713);
+            assert_eq!(path.exists(), valid, "only exact-size files may remain");
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
