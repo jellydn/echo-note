@@ -286,3 +286,149 @@ async fn test_get_nonexistent_meeting() {
         .expect("Failed to get meeting");
     assert!(meeting.is_none());
 }
+
+#[tokio::test]
+async fn search_tracks_transcript_and_summary_deletion() {
+    let pool = setup_test_db().await;
+    let meeting_id = create_test_meeting(&pool, "Planning").await;
+    let other_id = create_test_meeting(&pool, "Other meeting").await;
+    create_test_transcript(&pool, other_id, "shared phrase").await;
+    let transcript_id = create_test_transcript(&pool, meeting_id, "shared phrase").await;
+    let summary_id = create_test_summary(&pool, meeting_id, "launch comet", "", "").await;
+    assert_eq!(
+        search_meetings(&pool, "shared phrase").await.unwrap().len(),
+        2
+    );
+    assert_eq!(
+        search_meetings(&pool, "launch comet").await.unwrap()[0].id,
+        meeting_id
+    );
+    assert!(delete_transcript(&pool, transcript_id).await.unwrap());
+    let hits = search_meetings(&pool, "shared phrase").await.unwrap();
+    assert_eq!(
+        hits.iter().map(|m| m.id).collect::<Vec<_>>(),
+        vec![other_id]
+    );
+    assert_eq!(
+        search_meetings(&pool, "launch comet").await.unwrap()[0].id,
+        meeting_id
+    );
+    assert!(delete_summary(&pool, summary_id).await.unwrap());
+    assert!(search_meetings(&pool, "launch comet")
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        search_meetings(&pool, "Planning").await.unwrap()[0].id,
+        meeting_id
+    );
+    assert!(get_meeting(&pool, meeting_id).await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn search_retains_all_remaining_transcripts_and_summaries() {
+    let pool = setup_test_db().await;
+    let meeting_id = create_test_meeting(&pool, "Planning").await;
+    let first = create_test_transcript(&pool, meeting_id, "amber notes").await;
+    let second = create_test_transcript(&pool, meeting_id, "violet notes").await;
+    let first_summary = create_test_summary(&pool, meeting_id, "copper", "approved", "email").await;
+    let second_summary = create_test_summary(&pool, meeting_id, "silver", "rejected", "call").await;
+    for query in [
+        "amber notes",
+        "violet notes",
+        "copper",
+        "silver",
+        "approved",
+        "call",
+    ] {
+        assert_eq!(
+            search_meetings(&pool, query).await.unwrap()[0].id,
+            meeting_id,
+            "{query}"
+        );
+    }
+    assert!(update_transcript(&pool, first, "gold notes".to_string())
+        .await
+        .unwrap());
+    assert!(update_summary(
+        &pool,
+        first_summary,
+        "bronze".into(),
+        "deferred".into(),
+        "write".into()
+    )
+    .await
+    .unwrap());
+    assert!(search_meetings(&pool, "amber notes")
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(search_meetings(&pool, "copper").await.unwrap().is_empty());
+    assert!(delete_transcript(&pool, second).await.unwrap());
+    assert!(delete_summary(&pool, second_summary).await.unwrap());
+    for query in ["violet notes", "silver", "rejected", "call"] {
+        assert!(
+            search_meetings(&pool, query).await.unwrap().is_empty(),
+            "{query}"
+        );
+    }
+    for query in ["gold notes", "bronze", "deferred", "write", "Planning"] {
+        assert_eq!(
+            search_meetings(&pool, query).await.unwrap()[0].id,
+            meeting_id,
+            "{query}"
+        );
+    }
+    assert!(delete_meeting(&pool, meeting_id).await.unwrap());
+    assert!(search_meetings(&pool, "gold notes")
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn search_migration_repairs_existing_index() {
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    for migration in [
+        include_str!("../migrations/0001_initial_schema.sql"),
+        include_str!("../migrations/0002_meeting_search.sql"),
+    ] {
+        sqlx::raw_sql(migration).execute(&pool).await.unwrap();
+    }
+    let meeting_id = create_test_meeting(&pool, "Planning").await;
+    let stale = create_test_transcript(&pool, meeting_id, "stale phrase").await;
+    delete_transcript(&pool, stale).await.unwrap();
+    assert_eq!(
+        search_meetings(&pool, "stale phrase").await.unwrap().len(),
+        1
+    );
+    create_test_transcript(&pool, meeting_id, "amber notes").await;
+    create_test_transcript(&pool, meeting_id, "violet notes").await;
+    let stale_summary = create_test_summary(&pool, meeting_id, "obsolete", "", "").await;
+    delete_summary(&pool, stale_summary).await.unwrap();
+    sqlx::raw_sql(include_str!(
+        "../migrations/0003_meeting_search_lifecycle.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    for query in ["stale phrase", "obsolete"] {
+        assert!(
+            search_meetings(&pool, query).await.unwrap().is_empty(),
+            "{query}"
+        );
+    }
+    for query in ["amber notes", "violet notes", "Planning"] {
+        assert_eq!(
+            search_meetings(&pool, query).await.unwrap()[0].id,
+            meeting_id,
+            "{query}"
+        );
+    }
+    assert_eq!(list_transcripts(&pool).await.unwrap().len(), 2);
+    assert!(get_meeting(&pool, meeting_id).await.unwrap().is_some());
+}
