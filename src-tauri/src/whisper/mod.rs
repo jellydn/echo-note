@@ -6,6 +6,8 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
 use whisper_rs::WhisperContext;
 
+mod audio;
+
 use crate::diarization::{
     create_onnx_embedder, diarize, SegmentSpan, DEFAULT_SIMILARITY_THRESHOLD,
 };
@@ -376,10 +378,7 @@ pub async fn download_whisper_model(app_handle: &AppHandle, model_size: &str) ->
         Err(e) => {
             let _ = fs::remove_file(&partial_path);
             return Err(e).with_context(|| {
-                format!(
-                    "Failed to inspect downloaded model at {:?}",
-                    partial_path
-                )
+                format!("Failed to inspect downloaded model at {:?}", partial_path)
             });
         }
     };
@@ -420,7 +419,11 @@ pub async fn download_whisper_model(app_handle: &AppHandle, model_size: &str) ->
 /// verification and is gated behind `ECHO_NOTE_WHISPER_SMOKE_TEST=1` so it
 /// never runs accidentally during normal development.
 #[allow(dead_code)]
-pub fn run_whisper_smoke_test(app_handle: &AppHandle, audio_path: &str, model_size: &str) -> Result<()> {
+pub fn run_whisper_smoke_test(
+    app_handle: &AppHandle,
+    audio_path: &str,
+    model_size: &str,
+) -> Result<()> {
     let result = transcribe_audio(app_handle, audio_path, model_size)?;
     if result.text.trim().is_empty() {
         anyhow::bail!("Smoke test produced an empty transcript");
@@ -605,7 +608,7 @@ pub fn transcribe_audio_with_options(
     );
 
     // Read the WAV file
-    let mut reader = WavReader::open(audio_path)
+    let reader = WavReader::open(audio_path)
         .map_err(|e| anyhow::anyhow!("Failed to open audio file: {}", e))?;
 
     let spec = reader.spec();
@@ -615,26 +618,6 @@ pub fn transcribe_audio_with_options(
         spec.sample_rate,
         spec.bits_per_sample
     );
-
-    // Stream-decode the WAV in bounded windows: for each window we read a fixed
-    // number of raw i16 samples, downmix to mono, resample to 16 kHz, and feed
-    // Whisper. The full recording is only ever held in memory when speaker
-    // diarization is enabled (it needs random access to the whole signal).
-    let channels = spec.channels;
-    let window_samples_16k = MAX_AUDIO_SAMPLES;
-    let window_source =
-        ((window_samples_16k as f64 * f64::from(spec.sample_rate) / 16000.0) as usize).max(1);
-    let total_frames = reader.duration();
-    let total_windows = ((f64::from(total_frames) * 16000.0 / f64::from(spec.sample_rate))
-        / window_samples_16k as f64)
-        .ceil()
-        .max(1.0) as usize;
-
-    let mut raw_window: Vec<i16> = Vec::with_capacity(window_source * usize::from(channels));
-    let mut samples_iter = reader.samples::<i16>();
-
-    // Retain the full normalized signal only when diarization needs it.
-    let mut full_audio: Option<Vec<f32>> = options.diarization_enabled.then(Vec::new);
 
     // Set up transcription parameters
     let mut params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
@@ -656,100 +639,85 @@ pub fn transcribe_audio_with_options(
 
     let mut full_text = String::new();
     let mut transcript_segments = Vec::new();
-    let mut window_offset_seconds = 0.0f64;
     let mut windows_processed = 0usize;
+    let mut samples_processed = 0usize;
+    let spool = if options.diarization_enabled {
+        match tempfile::tempfile() {
+            Ok(file) => Some(file),
+            Err(_) => {
+                log::warn!("Diarization temp-create failed; keeping default speaker labels");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
-    loop {
-        raw_window.clear();
-        for _ in 0..window_source * usize::from(channels) {
-            match samples_iter.next() {
-                Some(Ok(sample)) => raw_window.push(sample),
-                Some(Err(e)) => {
-                    log::warn!("Skipping unreadable WAV sample: {}", e);
-                    break;
+    let audio_data = audio::decode_audio(
+        reader,
+        spool,
+        |mono_16k, index, total_windows, window_offset_seconds| {
+            // Emit progress relative to the estimated window count.
+            let percentage = 20.0 + (index as f32 / total_windows as f32) * 70.0;
+            let _ = app_handle.emit(
+                "transcription-progress",
+                TranscriptionProgress {
+                    percentage,
+                    status: format!("Transcribing (window {}/{})...", index + 1, total_windows),
+                },
+            );
+
+            // Run transcription on this window.
+            state
+                .full(params.clone(), mono_16k)
+                .map_err(|e| anyhow::anyhow!("Transcription failed: {:?}", e))?;
+
+            let num_segments = state.full_n_segments();
+
+            for i in 0..num_segments {
+                // whisper-rs 0.16: segments are accessed via `get_segment` which
+                // returns a `WhisperSegment` exposing text and timestamp getters.
+                // A `None` (phantom) segment is skipped rather than aborting the
+                // whole transcription — mirrors the old `full_get_segment_text`
+                // behaviour where an out-of-range index yields no text.
+                let Some(segment) = state.get_segment(i) else {
+                    continue;
+                };
+                let segment_text = segment
+                    .to_str()
+                    .map_err(|e| anyhow::anyhow!("Failed to get segment text: {:?}", e))?;
+                let segment_text = segment_text.trim();
+                if segment_text.is_empty() {
+                    continue;
                 }
-                None => break,
-            }
-        }
-        if raw_window.is_empty() {
-            break;
-        }
 
-        // Downmix + resample this bounded window.
-        let mono = pcm_i16_to_mono_f32(&raw_window, channels);
-        let mono_16k = if spec.sample_rate != 16000 {
-            resample_audio(&mono, spec.sample_rate, 16000)
-        } else {
-            mono
-        };
-        if let Some(full) = full_audio.as_mut() {
-            full.extend_from_slice(&mono_16k);
-        }
+                let start_seconds = window_offset_seconds + segment.start_timestamp() as f64 * 0.01;
+                let end_seconds = window_offset_seconds + segment.end_timestamp() as f64 * 0.01;
 
-        // Emit progress relative to the estimated window count.
-        let percentage = 20.0 + (windows_processed as f32 / total_windows as f32) * 70.0;
-        let _ = app_handle.emit(
-            "transcription-progress",
-            TranscriptionProgress {
-                percentage,
-                status: format!(
-                    "Transcribing (window {}/{})...",
-                    windows_processed + 1,
-                    total_windows
-                ),
-            },
-        );
-
-        // Run transcription on this window.
-        state
-            .full(params.clone(), &mono_16k)
-            .map_err(|e| anyhow::anyhow!("Transcription failed: {:?}", e))?;
-
-        let num_segments = state.full_n_segments();
-
-        for i in 0..num_segments {
-            // whisper-rs 0.16: segments are accessed via `get_segment` which
-            // returns a `WhisperSegment` exposing text and timestamp getters.
-            // A `None` (phantom) segment is skipped rather than aborting the
-            // whole transcription — mirrors the old `full_get_segment_text`
-            // behaviour where an out-of-range index yields no text.
-            let Some(segment) = state.get_segment(i) else {
-                continue;
-            };
-            let segment_text = segment
-                .to_str()
-                .map_err(|e| anyhow::anyhow!("Failed to get segment text: {:?}", e))?;
-            let segment_text = segment_text.trim();
-            if segment_text.is_empty() {
-                continue;
+                full_text.push_str(segment_text);
+                full_text.push(' ');
+                transcript_segments.push(TranscriptSegment {
+                    start_seconds,
+                    end_seconds,
+                    speaker: "Speaker 1".to_string(),
+                    text: segment_text.to_string(),
+                });
             }
 
-            let start_seconds = window_offset_seconds + segment.start_timestamp() as f64 * 0.01;
-            let end_seconds = window_offset_seconds + segment.end_timestamp() as f64 * 0.01;
+            windows_processed += 1;
+            samples_processed += mono_16k.len();
+            Ok(())
+        },
+    )?;
 
-            full_text.push_str(segment_text);
-            full_text.push(' ');
-            transcript_segments.push(TranscriptSegment {
-                start_seconds,
-                end_seconds,
-                speaker: "Speaker 1".to_string(),
-                text: segment_text.to_string(),
-            });
-        }
-
-        window_offset_seconds += mono_16k.len() as f64 / 16000.0;
-        windows_processed += 1;
-    }
-
-    let audio_data = full_audio.unwrap_or_default();
     log::info!(
         "Audio samples processed: {} ({} windows)",
-        audio_data.len(),
+        samples_processed,
         windows_processed
     );
 
     // Speaker diarization (best-effort: keep "Speaker 1" labels if anything goes wrong).
-    if options.diarization_enabled && !transcript_segments.is_empty() {
+    if let Some(mut audio_data) = audio_data.filter(|_| !transcript_segments.is_empty()) {
         let _ = app_handle.emit(
             "transcription-progress",
             TranscriptionProgress {
@@ -758,46 +726,13 @@ pub fn transcribe_audio_with_options(
             },
         );
 
-        let spans: Vec<SegmentSpan> = transcript_segments
-            .iter()
-            .map(|s| SegmentSpan {
-                start_seconds: s.start_seconds,
-                end_seconds: s.end_seconds,
-            })
-            .collect();
-
         match create_onnx_embedder(app_handle) {
-            Ok(embedder) => match diarize(
-                &audio_data,
-                &spans,
+            Ok(embedder) => label_transcript_segments(
+                &mut audio_data,
+                &mut transcript_segments,
                 &embedder,
                 options.diarization_threshold,
-            ) {
-                Ok(labels) if labels.len() == transcript_segments.len() => {
-                    // If only one speaker is detected, leave the default label so the UI
-                    // doesn't imply multi-speaker analysis happened on a monologue.
-                    let unique = labels
-                        .iter()
-                        .collect::<std::collections::HashSet<_>>()
-                        .len();
-                    if unique > 1 {
-                        for (segment, label) in transcript_segments.iter_mut().zip(labels.iter()) {
-                            segment.speaker = label.clone();
-                        }
-                        log::info!("Diarization detected {} speakers", unique);
-                    } else {
-                        log::info!("Diarization detected a single speaker; keeping default label");
-                    }
-                }
-                Ok(_) => {
-                    log::warn!(
-                        "Diarization returned a mismatched label count; keeping default speaker labels"
-                    );
-                }
-                Err(e) => {
-                    log::warn!("Diarization failed, keeping default speaker labels: {}", e);
-                }
-            },
+            ),
             Err(e) => {
                 log::warn!(
                     "Diarization model unavailable, keeping default speaker labels: {}",
@@ -825,6 +760,43 @@ pub fn transcribe_audio_with_options(
         segments: transcript_segments,
         duration_seconds: duration,
     })
+}
+
+/// Commit labels only after a complete pass, preserving the transcript on any
+/// scratch-read, oversized-span or model failure.
+fn label_transcript_segments<R: std::io::Read + std::io::Seek, E: crate::diarization::Embedder>(
+    audio: &mut R,
+    segments: &mut [TranscriptSegment],
+    embedder: &E,
+    threshold: f32,
+) {
+    let spans: Vec<_> = segments
+        .iter()
+        .map(|s| SegmentSpan {
+            start_seconds: s.start_seconds,
+            end_seconds: s.end_seconds,
+        })
+        .collect();
+    match diarize(audio, &spans, embedder, threshold) {
+        Ok(labels) if labels.len() == segments.len() => {
+            let unique = labels
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len();
+            if unique > 1 {
+                for (segment, label) in segments.iter_mut().zip(labels) {
+                    segment.speaker = label;
+                }
+                log::info!("Diarization detected {} speakers", unique);
+            } else {
+                log::info!("Diarization detected a single speaker; keeping default label");
+            }
+        }
+        Ok(_) => log::warn!(
+            "Diarization returned a mismatched label count; keeping default speaker labels"
+        ),
+        Err(e) => log::warn!("Diarization failed, keeping default speaker labels: {}", e),
+    }
 }
 
 fn format_transcript_segments(segments: &[TranscriptSegment]) -> String {
@@ -925,7 +897,10 @@ mod tests {
         cache.insert("base".to_string(), 2);
         cache.insert("small".to_string(), 3);
 
-        assert!(cache.get("tiny").is_none(), "oldest entry should be evicted");
+        assert!(
+            cache.get("tiny").is_none(),
+            "oldest entry should be evicted"
+        );
         assert_eq!(cache.get("base"), Some(&2));
         assert_eq!(cache.get("small"), Some(&3));
         assert_eq!(cache.len(), 2);
@@ -969,7 +944,8 @@ mod tests {
 
     #[test]
     fn validate_model_file_accepts_matching_size() {
-        let dir = std::env::temp_dir().join(format!("echo-note-whisper-test-{}", uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("echo-note-whisper-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("ggml-tiny.bin");
         std::fs::write(&path, vec![0u8; 78_000_000]).unwrap();
@@ -981,7 +957,8 @@ mod tests {
 
     #[test]
     fn validate_model_file_removes_mismatched_size() {
-        let dir = std::env::temp_dir().join(format!("echo-note-whisper-test-{}", uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("echo-note-whisper-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("ggml-tiny.bin");
         std::fs::write(&path, vec![0u8; 1024]).unwrap();
@@ -1093,5 +1070,78 @@ mod tests {
             format_transcript_segments(&segments),
             "[00:00] Speaker 1: Hello\n[01:02] Speaker 1: Follow up tomorrow"
         );
+    }
+
+    #[test]
+    fn diarization_labels_are_applied_atomically_without_changing_text_or_times() {
+        use std::io::{Cursor, Read, Seek, SeekFrom};
+        struct SignEmbedder;
+        impl crate::diarization::Embedder for SignEmbedder {
+            fn embed(&self, audio: &[f32]) -> Result<Vec<f32>> {
+                Ok(if audio.first().copied().unwrap_or(0.0) > 0.0 {
+                    vec![1.0, 0.0]
+                } else {
+                    vec![0.0, 1.0]
+                })
+            }
+        }
+        struct ReadError(Cursor<Vec<u8>>);
+        impl Read for ReadError {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("read failed"))
+            }
+        }
+        impl Seek for ReadError {
+            fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+                self.0.seek(pos)
+            }
+        }
+        let original: Vec<_> = ["First", "Second", "Third"]
+            .iter()
+            .enumerate()
+            .map(|(i, text)| TranscriptSegment {
+                start_seconds: i as f64,
+                end_seconds: i as f64 + 1.0,
+                speaker: "Speaker 1".into(),
+                text: (*text).into(),
+            })
+            .collect();
+        let pcm: Vec<u8> = [0.25f32, -0.5, 0.25]
+            .into_iter()
+            .flat_map(|v| std::iter::repeat_n(v.to_le_bytes(), 16_000).flatten())
+            .collect();
+        let mut labeled = original.clone();
+        label_transcript_segments(&mut Cursor::new(&pcm), &mut labeled, &SignEmbedder, 0.75);
+        assert_eq!(
+            format_transcript_segments(&labeled),
+            "[00:00] Speaker A: First\n[00:01] Speaker B: Second\n[00:02] Speaker A: Third"
+        );
+        for (before, after) in original.iter().zip(&labeled) {
+            assert_eq!(
+                (before.start_seconds, before.end_seconds, &before.text),
+                (after.start_seconds, after.end_seconds, &after.text)
+            );
+        }
+        let mut unreadable = original.clone();
+        label_transcript_segments(
+            &mut ReadError(Cursor::new(pcm)),
+            &mut unreadable,
+            &SignEmbedder,
+            0.75,
+        );
+        assert_eq!(
+            format_transcript_segments(&unreadable),
+            format_transcript_segments(&original)
+        );
+
+        // Fail on the second segment, after a valid first embedding. No partial
+        // labels may escape and no segment text or timestamp may be truncated.
+        let mut oversized = original.clone();
+        oversized[1].end_seconds = 31.0000625;
+        let expected = serde_json::to_value(&oversized).unwrap();
+        let mut sparse = tempfile::tempfile().unwrap();
+        sparse.set_len(32 * 16_000 * 4).unwrap();
+        label_transcript_segments(&mut sparse, &mut oversized, &SignEmbedder, 0.75);
+        assert_eq!(serde_json::to_value(&oversized).unwrap(), expected);
     }
 }

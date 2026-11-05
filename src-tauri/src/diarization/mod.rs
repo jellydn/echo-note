@@ -11,7 +11,11 @@ pub mod embedding;
 
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
-use std::{fs, io::Write, path::PathBuf};
+use std::{
+    fs,
+    io::{BufReader, Read, Seek, SeekFrom, Write},
+    path::PathBuf,
+};
 use tauri::{AppHandle, Emitter, Manager};
 
 pub use clustering::{cluster_speakers, speaker_label};
@@ -23,13 +27,16 @@ pub use embedding::{Embedder, OnnxSpeakerEmbedder, TARGET_SAMPLE_RATE};
 /// as the same speaker. Tunable per user via settings.
 pub const DEFAULT_SIMILARITY_THRESHOLD: f32 = 0.75;
 
+/// Whisper windows are thirty seconds; never allocate a larger embedding slice.
+pub const MAX_SEGMENT_SAMPLES: usize = 30 * TARGET_SAMPLE_RATE as usize;
+
 pub const DIARIZATION_MODEL_ID: &str = "ecapa-tdnn-speaker-encoder";
 pub const DIARIZATION_MODEL_FILENAME: &str = "speaker_encoder_int8.onnx";
 pub const DIARIZATION_MODEL_EXPECTED_SIZE: u64 = 9_337_463;
 pub const DIARIZATION_MODEL_URL: &str = "https://huggingface.co/marksverdhei/Qwen3-Voice-Embedding-12Hz-0.6B-onnx/resolve/main/speaker_encoder_int8.onnx";
 
 /// One transcript segment with the time range covered by its audio slice.
-/// The audio passed to [`diarize`] must already be mono `f32` PCM at
+/// The audio passed to [`diarize`] must be headerless little-endian mono `f32` PCM at
 /// [`TARGET_SAMPLE_RATE`].
 #[derive(Debug, Clone)]
 pub struct SegmentSpan {
@@ -64,8 +71,8 @@ struct DiarizationDownloadProgress {
 /// Returns a label per segment. If `segments` is empty, returns an empty
 /// `Vec`. If only one cluster is found, the prior single-speaker convention
 /// (`"Speaker 1"`) is preserved.
-pub fn diarize<E: Embedder>(
-    audio_16k_mono: &[f32],
+pub fn diarize<R: Read + Seek, E: Embedder>(
+    audio_16k_mono: &mut R,
     segments: &[SegmentSpan],
     embedder: &E,
     threshold: f32,
@@ -74,10 +81,31 @@ pub fn diarize<E: Embedder>(
         return Ok(Vec::new());
     }
 
+    let mut reader = BufReader::with_capacity(64 * 1024, audio_16k_mono);
+    let bytes = reader.seek(SeekFrom::End(0)).context("audio-seek")?;
+    anyhow::ensure!(bytes % 4 == 0, "audio-length");
+    let total_samples = bytes / 4;
+    let mut samples = Vec::with_capacity(MAX_SEGMENT_SAMPLES);
     let mut embeddings = Vec::with_capacity(segments.len());
     for seg in segments {
-        let slice = audio_slice(audio_16k_mono, seg);
-        let embedding = embedder.embed(slice)?;
+        let sr = TARGET_SAMPLE_RATE as f64;
+        let start = ((seg.start_seconds.max(0.0) * sr) as u64).min(total_samples);
+        let end = ((seg.end_seconds.max(0.0) * sr) as u64)
+            .min(total_samples)
+            .max(start);
+        anyhow::ensure!(end - start <= MAX_SEGMENT_SAMPLES as u64, "span-too-large");
+        reader
+            .seek(SeekFrom::Start(
+                start.checked_mul(4).context("audio-offset")?,
+            ))
+            .context("audio-seek")?;
+        samples.clear();
+        for _ in start..end {
+            let mut bytes = [0; 4];
+            reader.read_exact(&mut bytes).context("audio-read")?;
+            samples.push(f32::from_le_bytes(bytes));
+        }
+        let embedding = embedder.embed(&samples)?;
         embeddings.push(embedding);
     }
 
@@ -242,21 +270,13 @@ pub async fn download_diarization_model(app_handle: &AppHandle) -> Result<PathBu
     Ok(model_path)
 }
 
-/// Extract the audio samples that fall inside `seg`. The returned slice is
-/// clamped to the bounds of `audio` so out-of-range timestamps degrade
-/// gracefully.
-fn audio_slice<'a>(audio: &'a [f32], seg: &SegmentSpan) -> &'a [f32] {
-    let sr = TARGET_SAMPLE_RATE as f64;
-    let start = (seg.start_seconds.max(0.0) * sr) as usize;
-    let end = (seg.end_seconds.max(0.0) * sr) as usize;
-    let start = start.min(audio.len());
-    let end = end.min(audio.len()).max(start);
-    &audio[start..end]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pcm(samples: &[f32]) -> std::io::Cursor<Vec<u8>> {
+        std::io::Cursor::new(samples.iter().flat_map(|s| s.to_le_bytes()).collect())
+    }
 
     /// Build a 1-second mono signal at 16 kHz with the given frequency.
     fn sine_segment(freq: f32, seconds: f64, sample_rate: u32) -> Vec<f32> {
@@ -270,7 +290,7 @@ mod tests {
 
     #[test]
     fn empty_segments_returns_empty_labels() {
-        let labels = diarize(&[], &[], &AcousticFeatureEmbedder::new(), 0.75).unwrap();
+        let labels = diarize(&mut pcm(&[]), &[], &AcousticFeatureEmbedder::new(), 0.75).unwrap();
         assert!(labels.is_empty());
     }
 
@@ -282,7 +302,7 @@ mod tests {
             end_seconds: 1.0,
         }];
         let labels = diarize(
-            &audio,
+            &mut pcm(&audio),
             &segments,
             &AcousticFeatureEmbedder::new(),
             DEFAULT_SIMILARITY_THRESHOLD,
@@ -322,7 +342,13 @@ mod tests {
 
         // Use a low threshold; the synthetic embeddings are not normalised to
         // ECAPA-TDNN's distribution.
-        let labels = diarize(&audio, &segments, &AcousticFeatureEmbedder::new(), 0.5).unwrap();
+        let labels = diarize(
+            &mut pcm(&audio),
+            &segments,
+            &AcousticFeatureEmbedder::new(),
+            0.5,
+        )
+        .unwrap();
         assert_eq!(labels.len(), 4);
         assert_eq!(labels[0], "Speaker A");
         assert_eq!(labels[1], "Speaker B");
@@ -337,7 +363,110 @@ mod tests {
             start_seconds: 10.0,
             end_seconds: 11.0,
         }];
-        let labels = diarize(&audio, &segments, &AcousticFeatureEmbedder::new(), 0.75).unwrap();
+        let labels = diarize(
+            &mut pcm(&audio),
+            &segments,
+            &AcousticFeatureEmbedder::new(),
+            0.75,
+        )
+        .unwrap();
         assert_eq!(labels, vec!["Speaker 1".to_string()]);
+    }
+
+    #[test]
+    fn embedding_audio_is_limited_to_thirty_seconds() {
+        let audio = vec![0.25; 480_001];
+        let embedder = AcousticFeatureEmbedder::new();
+        let allowed = [SegmentSpan {
+            start_seconds: 0.0,
+            end_seconds: 30.0,
+        }];
+        assert_eq!(
+            diarize(&mut pcm(&audio), &allowed, &embedder, 0.75).unwrap(),
+            ["Speaker 1"]
+        );
+        let oversized = [SegmentSpan {
+            start_seconds: 0.0,
+            end_seconds: 480_001.0 / 16_000.0,
+        }];
+        assert!(diarize(&mut pcm(&audio), &oversized, &embedder, 0.75).is_err());
+    }
+
+    #[test]
+    fn seekable_audio_preserves_clamped_and_cross_window_ranges() {
+        struct ExactEmbedder(Vec<f32>);
+        impl Embedder for ExactEmbedder {
+            fn embed(&self, audio: &[f32]) -> Result<Vec<f32>> {
+                assert_eq!(audio, self.0);
+                Ok(vec![1.0, 0.0])
+            }
+        }
+        // Different markers on either side of a production 30-second boundary.
+        let mut audio = vec![0.25; 480_000];
+        audio.extend(vec![-0.5; 16_000]);
+        for (start, end, expected) in [
+            (-1.0, 1.0, vec![0.25; 16_000]),
+            (30.0, 50.0, vec![-0.5; 16_000]),
+            (1.0, 0.5, vec![]),
+            (50.0, 51.0, vec![]),
+            (29.5, 30.5, [vec![0.25; 8000], vec![-0.5; 8000]].concat()),
+        ] {
+            let spans = [SegmentSpan {
+                start_seconds: start,
+                end_seconds: end,
+            }];
+            assert_eq!(
+                diarize(&mut pcm(&audio), &spans, &ExactEmbedder(expected), 0.75).unwrap(),
+                ["Speaker 1"]
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_or_unreadable_spool_returns_no_partial_labels() {
+        struct BrokenReader {
+            seek_fails: bool,
+        }
+        impl Read for BrokenReader {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Ok(0)
+            }
+        }
+        impl Seek for BrokenReader {
+            fn seek(&mut self, _: SeekFrom) -> std::io::Result<u64> {
+                if self.seek_fails {
+                    return Err(std::io::Error::other("seek failed"));
+                }
+                Ok(64_000) // Advertised length, but its data is unavailable.
+            }
+        }
+        let spans = [SegmentSpan {
+            start_seconds: 0.0,
+            end_seconds: 1.0,
+        }];
+        let embedder = AcousticFeatureEmbedder::new();
+        for seek_fails in [false, true] {
+            assert!(diarize(&mut BrokenReader { seek_fails }, &spans, &embedder, 0.75).is_err());
+        }
+        assert!(diarize(
+            &mut std::io::Cursor::new(vec![0; 3]),
+            &spans,
+            &embedder,
+            0.75
+        )
+        .is_err());
+
+        let mut sparse = tempfile::tempfile().unwrap();
+        sparse.set_len(20_000_000_000).unwrap();
+        let oversized = [SegmentSpan {
+            start_seconds: 0.0,
+            end_seconds: 100_000.0,
+        }];
+        assert_eq!(
+            diarize(&mut sparse, &oversized, &embedder, 0.75)
+                .unwrap_err()
+                .to_string(),
+            "span-too-large"
+        );
     }
 }

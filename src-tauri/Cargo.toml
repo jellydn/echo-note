@@ -38,6 +38,7 @@ ort = "=2.0.0-rc.15"
 ndarray = "0.17"
 rustfft = "6"
 keyring = "4"
+tempfile = "3.27"
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
