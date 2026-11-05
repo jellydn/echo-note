@@ -50,9 +50,23 @@ pub struct OnnxSpeakerEmbedder {
 
 impl OnnxSpeakerEmbedder {
     pub fn from_model_path(path: &Path) -> Result<Self> {
-        let environment = ort::init()
-            .build()
-            .map_err(|e| anyhow::anyhow!("Failed to create ONNX environment: {:?}", e))?;
+        // ort permits only one environment creation per process, even after all
+        // sessions drop. Keep it alive across failed loads and transcriptions.
+        let environment = {
+            static ENVIRONMENT: Mutex<Option<ort::environment::Environment>> = Mutex::new(None);
+            let mut stored = ENVIRONMENT
+                .lock()
+                .map_err(|_| anyhow::anyhow!("ONNX environment lock poisoned"))?;
+            if let Some(environment) = stored.as_ref() {
+                environment.clone()
+            } else {
+                let environment = ort::init()
+                    .build()
+                    .map_err(|e| anyhow::anyhow!("Failed to create ONNX environment: {:?}", e))?;
+                *stored = Some(environment.clone());
+                environment
+            }
+        };
         // ort's builder methods return `Error<SessionBuilder>` which
         // is not Send/Sync, so `?` cannot convert into anyhow — map explicitly.
         let mut builder = Session::builder(&environment)
@@ -61,9 +75,13 @@ impl OnnxSpeakerEmbedder {
             .map_err(|e| anyhow::anyhow!("Failed to set optimization level: {:?}", e))?
             .with_intra_threads(2)
             .map_err(|e| anyhow::anyhow!("Failed to set intra threads: {:?}", e))?;
-        let session = builder
-            .commit_from_file(path)
-            .map_err(|e| anyhow::anyhow!("Failed to load diarization model at {}: {:?}", path.display(), e))?;
+        let session = builder.commit_from_file(path).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to load diarization model at {}: {:?}",
+                path.display(),
+                e
+            )
+        })?;
 
         let input_name = session
             .inputs()
@@ -476,6 +494,36 @@ mod tests {
         (0..samples)
             .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sample_rate).sin() * 0.5)
             .collect()
+    }
+
+    #[test]
+    #[ignore = "requires ECHO_NOTE_DIARIZATION_MODEL pointing to the production ONNX model"]
+    fn onnx_embedder_reloads_after_failure_and_drop() {
+        let model = std::path::PathBuf::from(
+            std::env::var_os("ECHO_NOTE_DIARIZATION_MODEL")
+                .expect("set ECHO_NOTE_DIARIZATION_MODEL"),
+        );
+        let absent = std::env::temp_dir().join(format!("missing-{}.onnx", uuid::Uuid::new_v4()));
+        assert!(OnnxSpeakerEmbedder::from_model_path(&absent).is_err());
+
+        let audio = sine(220.0, 16_000, 16_000.0);
+        let mut previous: Option<Vec<f32>> = None;
+        for _ in 0..3 {
+            let embedder = OnnxSpeakerEmbedder::from_model_path(&model).unwrap();
+            let embedding = embedder.embed(&audio).unwrap();
+            assert!(!embedding.is_empty());
+            assert!(embedding.iter().all(|v| v.is_finite()));
+            let norm = embedding.iter().map(|v| v * v).sum::<f32>().sqrt();
+            assert!((norm - 1.0).abs() < 1e-3);
+            if let Some(previous) = previous.as_ref() {
+                assert_eq!(previous.len(), embedding.len());
+                assert!(previous
+                    .iter()
+                    .zip(&embedding)
+                    .all(|(a, b)| (a - b).abs() < 1e-6));
+            }
+            previous = Some(embedding);
+        }
     }
 
     #[test]
