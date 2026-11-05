@@ -16,7 +16,7 @@
 
 use echo_note_lib::db::{Meeting, Summary, Transcript};
 use echo_note_lib::export::{export_filename, render_meeting_markdown, render_meeting_text};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::path::PathBuf;
 
@@ -96,6 +96,11 @@ fn golden_outputs_match_rust_renderers() {
 fn regenerate_goldens() {
     let fixture = load_fixture();
     let goldens = build_golden_map(&fixture);
-    let pretty = serde_json::to_string_pretty(&goldens).expect("golden map must serialize");
-    std::fs::write(golden_path(), format!("{pretty}\n")).expect("failed to write golden file");
+    let mut pretty = Vec::new();
+    let formatter = serde_json::ser::PrettyFormatter::with_indent(b"\t");
+    goldens
+        .serialize(&mut serde_json::Serializer::with_formatter(&mut pretty, formatter))
+        .expect("golden map must serialize");
+    pretty.push(b'\n');
+    std::fs::write(golden_path(), pretty).expect("failed to write golden file");
 }

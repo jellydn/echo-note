@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildMarkdownExport, buildTextExport, exportFilename } from "../exportRenderers";
-import fixture from "./fixtures/export-meeting.json";
 import goldens from "./fixtures/export-golden.json";
+import fixture from "./fixtures/export-meeting.json";
 
 // Golden fidelity test (frontend CI job).
 //
