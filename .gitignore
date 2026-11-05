@@ -24,3 +24,6 @@ dist-ssr
 *.sln
 *.sw?
 /.claude/settings.local.json
+
+# Amp portal registrations are local to an orb.
+.amp/portals/

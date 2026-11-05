@@ -117,6 +117,8 @@ pub type WhisperModelCache = ModelCache<WhisperContext>;
 /// test (`ECHO_NOTE_WHISPER_SMOKE_TEST=1`). Renovate updates to `whisper-rs`
 /// must run that smoke test before merge.
 pub const WHISPER_MODELS: &[(&str, &str, u64, &str)] = &[
+    // ggerganov/whisper.cpp at 5359861c739e955e79d9a303bcbc70fb988958b1:
+    // 77,691,713 bytes, SHA-256 be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21.
     ("tiny", "ggml-tiny.bin", 77_691_713, "Tiny"),
     ("tiny-q5_1", "ggml-tiny-q5_1.bin", 33_000_000, "Tiny (Q5)"),
     ("base", "ggml-base.bin", 149_000_000, "Base"),
@@ -972,7 +974,7 @@ mod tests {
         let path = dir.join("ggml-tiny.bin");
         std::fs::write(&path, vec![0u8; 1024]).unwrap();
 
-        assert!(!validate_model_file(&path, 78_000_000).unwrap());
+        assert!(!validate_model_file(&path, 77_691_713).unwrap());
         assert!(!path.exists(), "corrupt file must be removed");
         std::fs::remove_dir_all(&dir).unwrap();
     }
